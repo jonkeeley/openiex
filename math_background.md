@@ -27,7 +27,7 @@ Where:
 
 #### 2. Protein–Ion Exchange (SMA model):
 $$
-C_j + \nu_j \overline{Q}_{i} \overset{K_{eq,j-i}}{\rightleftharpoons} Q_j + \nu_j C_i
+C_j + \nu_j \bar{Q}_{i} \overset{K_{eq,j-i}}{\rightleftharpoons} Q_j + \nu_j C_i
 $$
 
 Where:
@@ -46,7 +46,7 @@ This exchangeable fraction is a function of:
 - The total ionic capacity of the resin $ \Lambda $
 - The amount of protein bound $ Q_j $
 - Each protein’s displacement coefficient $ \nu_j $
-- Each protein's steric factor $ \sigma_j $, representing the number of the number of additional binding sites rendered inaccessible to other proteins due to steric hindrance from a single bound molecule of protein $ j $, though these sites remain available for ion-ion exchange
+- Each protein's steric factor $ \sigma_j $, representing the number of additional binding sites rendered inaccessible to other proteins due to steric hindrance from a single bound molecule of protein $ j $, though these sites remain available for ion-ion exchange
 - The bound concentrations of other counterions $ Q_k $
 
 Under this framework, $ \overline{Q}_i $ can be written as:
