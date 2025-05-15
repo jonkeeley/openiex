@@ -1,4 +1,5 @@
 import numpy as np
+from scipy.interpolate import interp1d
 from typing import Any
 from dataclasses import dataclass
 from scipy.integrate import solve_ivp
@@ -41,7 +42,6 @@ def method_duration(method: Method, system):
     )
 
 class ODEFunction:
-    """Encapsulates your ODE + progress bar."""
     def __init__(self, chromat_method: Method, system: ExchangeSystem):
         self.method  = chromat_method
         self.system  = system
@@ -93,89 +93,84 @@ def resume_simulation(
     **ivp_kwargs: Any
 ) -> SimulationResult:
     """
-    Resume a previous SimulationResult at time t_start (absolute),
-    then run a new method over t_eval (which is relative, from 0→new_t_final),
-    stitch the trajectories, and return a new SimulationResult.
-
-    Args:
-      prev_result:     the original SimulationResult
-      t_eval:          1D array of new times from 0 → new_t_final
-      chromat_method:  Method for the continuation (buffers must match prev_result.method.buffers)
-      system:          your ExchangeSystem instance (must equal prev_result.system)
-    Keyword Args:
-      t_start:         absolute time in prev_result.t to resume from;
-                       if None, defaults to prev_result.t[-1]
-      integrator:      scipy integrator name (e.g. "BDF", "RK45")
-      **ivp_kwargs:    passed through to run_simulation (rtol, atol, max_step…)
-
-    Returns:
-      SimulationResult with:
-        - t:      concatenated absolute times [0…t_start…t_start+t_eval[-1]]
-        - y:      concatenated state array
-        - system: same ExchangeSystem
-        - method: a Method whose blocks = [truncated_old_block] + chromat_method.blocks
+    Resume a previous SimulationResult at (or just before) t_start,
+    keeping all earlier blocks, truncating the current block there,
+    then appending the new chromat_method.blocks. Returns a new
+    SimulationResult with combined t, y, system, and method.
     """
-    # unpack the old result
-    t_old, y_old, old_system, old_method = (
+    t_old, y_old, old_sys, old_method = (
         prev_result.t,
         prev_result.y,
         prev_result.system,
         prev_result.method,
     )
 
-    # 1) sanity checks
-    if system != old_system:
-        raise ValueError("The provided system must match prev_result.system.")
+    if system.to_math_dict() != old_sys.to_math_dict():
+        raise ValueError("System definitions (config + binding params) must match prev_result.")
     if chromat_method.buffers != old_method.buffers:
-        raise ValueError("Buffers of the new method must match the old method.")
+        raise ValueError("Buffers of the new method must match old_method.buffers.")
 
-    # 2) pick t_start
     if t_start is None:
         t_start = t_old[-1]
+    if t_start > t_old[-1]:
+        raise ValueError(f"t_start={t_start:.2f} exceeds original duration of {t_old[-1]:.2f} s")
 
-    # 3) find which block covers t_start and truncate it
-    block_start = 0.0
+    interp = interp1d(t_old, y_old, axis=1, bounds_error=True)
+    y0 = interp(t_start)
+
+    elapsed = 0.0
     truncated = None
-    for blk in old_method.blocks:
-        flow = blk["flow_rate_mL_min"] * 1.667e-8
-        dur  = blk["duration_CV"] * system.config.vol_column / flow
-        block_end = block_start + dur
+    Vcol = system.config.vol_column  # total bed volume (m^3)
+    block_index = None
 
-        # allow t_start == block_end for the last block
-        if block_start <= t_start <= block_end:
-            frac = (t_start - block_start) / dur if dur>0 else 1.0
+    for idx_blk, blk in enumerate(old_method.blocks):
+        flow_m3_s = blk["flow_rate_mL_min"] * 1.667e-8
+        dur_s     = blk["duration_CV"] * Vcol / flow_m3_s
+        end       = elapsed + dur_s
+
+        if elapsed <= t_start <= end:
+            dt_in_block = t_start - elapsed
+            # exact CV elapsed in this block
+            cv_part = dt_in_block * flow_m3_s / Vcol
+            # compute fraction for %B interpolation
+            frac = dt_in_block / dur_s if dur_s > 0 else 1.0
+            startB, endB = blk["start_B"], blk["end_B"]
+            endB_part = startB + frac * (endB - startB)
+
             truncated = {
-                "buffer_A":    blk["buffer_A"],
-                "buffer_B":    blk["buffer_B"],
-                "start_B":     blk["start_B"],
-                "end_B":       blk["start_B"] + frac*(blk["end_B"] - blk["start_B"]),
-                "duration_CV": blk["duration_CV"] * frac,
+                "buffer_A": blk["buffer_A"],
+                "buffer_B": blk["buffer_B"],
+                "start_B": startB,
+                "end_B": endB_part,
+                "duration_CV": cv_part,
                 "flow_rate_mL_min": blk["flow_rate_mL_min"],
             }
+            block_index = idx_blk
             break
-        block_start = block_end
 
-    if truncated is None:
-        raise ValueError(f"t_start={t_start} is outside the old method blocks.")
+        elapsed = end
 
-    # 4) build the combined Method
-    combined_blocks = [truncated] + chromat_method.blocks
+    if truncated is None or block_index is None:
+        raise ValueError(f"t_start={t_start} s is not inside any old block.")
+
+    combined_blocks = (
+        old_method.blocks[:block_index]
+        + [truncated]
+        + chromat_method.blocks
+    )
     method_combined = Method(chromat_method.buffers, combined_blocks)
 
-    # 5) extract the state at t_start
-    idx = np.searchsorted(t_old, t_start, side="left")
-    if idx==len(t_old) or not np.isclose(t_old[idx], t_start):
-        raise ValueError("t_start must exactly match a point in prev_result.t")
-    y0 = y_old[:, idx]
+    t_abs   = t_start + t_eval
+    new_res = run_simulation(y0, t_abs, method_combined, system,
+                              integrator=integrator, **ivp_kwargs)
 
-    # 6) shift t_eval into absolute time and rerun
-    t_abs = t_start + t_eval
-    res_new = run_simulation(y0, t_abs, method_combined, system,
-                             integrator=integrator, **ivp_kwargs)
+    mask    = t_old < t_start
+    t_comb  = np.concatenate([t_old[mask], new_res.t])
+    y_comb  = np.concatenate([y_old[:, mask], new_res.y], axis=1)
 
-    # 7) stitch the old and new segments (dropping duplicate at idx)
-    t_comb = np.concatenate([t_old[:idx], res_new.t])
-    y_comb = np.concatenate([y_old[:, :idx], res_new.y], axis=1)
-
-    return SimulationResult(t=t_comb, y=y_comb,
-                            system=system, method=method_combined)
+    return SimulationResult(
+        t=t_comb,
+        y=y_comb,
+        system=system,
+        method=method_combined
+    )
