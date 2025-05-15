@@ -1,9 +1,7 @@
 import numpy as np
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 import warnings
 from .system import ExchangeSystem
-from .solver import SimulationResult  # needed for type checking
-
 
 def initialize_state(
     initial_conditions: Dict[str, Dict[str, Any]],
@@ -32,9 +30,9 @@ def initialize_state(
     ])
 
 def load_state(
-    prev_result: SimulationResult,
+    prev_result: Any,
     system: ExchangeSystem,
-    t_start: float = None
+    t_start: Optional[float] = None
 ) -> np.ndarray:
     """
     Extract a packed y0 from prev_result at (or just before) t_start.
@@ -45,7 +43,11 @@ def load_state(
 
     Returns the packed y0 ready for run_simulation.
     """
-    # Unpack previous run
+    from .solver import SimulationResult
+
+    if not isinstance(prev_result, SimulationResult):
+        raise TypeError("prev_result must be a SimulationResult")
+
     t_old, y_old, old_system, _ = (
         prev_result.t,
         prev_result.y,
@@ -53,17 +55,14 @@ def load_state(
         prev_result.method
     )
 
-    # Default t_start to final time if not specified
     if t_start is None:
         t_start = t_old[-1]
 
-    # 1) check Nz
     Nz_old = old_system.config.Nz
     Nz_new = system.config.Nz
     if Nz_old != Nz_new:
         raise ValueError(f"Nz mismatch: old {Nz_old}, new {Nz_new}")
 
-    # 2) ensure new system has superset of species with matching attributes
     for name, old_sp in old_system.species.items():
         if name not in system.species:
             raise KeyError(f"Species '{name}' missing in new system")
@@ -74,16 +73,13 @@ def load_state(
             if (old_sp.sigma, old_sp.nu) != (new_sp.sigma, new_sp.nu):
                 warnings.warn(f"Protein '{name}' sigma/nu differ")
 
-    # 3) locate index of last time <= t_start
     idx = np.searchsorted(t_old, t_start, side="right") - 1
     if idx < 0:
         raise ValueError(f"t_start={t_start} is before trajectory start")
 
-    # 4) unpack old state at that time
     y_slice = y_old[:, idx]
     C_old, Q_old = unpack_state(y_slice, old_system)
 
-    # 5) build new C/Q dicts (zero for any new species)
     C_new: Dict[str, np.ndarray] = {}
     Q_new: Dict[str, np.ndarray] = {}
     for name in system.species:
@@ -94,7 +90,6 @@ def load_state(
             C_new[name] = np.zeros(Nz_new)
             Q_new[name] = np.zeros(Nz_new)
 
-    # 6) repack into new y0
     return pack_state(C_new, Q_new, system)
 
 def unpack_state(y, system):
