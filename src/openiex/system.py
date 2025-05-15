@@ -77,10 +77,12 @@ class ExchangeSystem:
             name: Ion(name, **vals)
             for name, vals in data["ions"].items()
         }
-        proteins = {
-            name: Protein(name, **vals)
-            for name, vals in data["proteins"].items()
-        }
+        proteins = {}
+        for name, vals in data["proteins"].items():
+            # drop the 'unit' key (only used for plotting/feeds)
+            vals = dict(vals)               # shallow copy
+            vals.pop("unit", None)
+            proteins[name] = Protein(name, **vals)
         sys = cls(ions, proteins, cfg)
 
         # re‑apply equilibria

@@ -1,61 +1,74 @@
-# src/chromatography_sim/io.py
 import numpy as np
 import json
 from pathlib import Path
-from typing import Tuple
+from typing import Tuple, Dict, Any
 from .system import ExchangeSystem
 from .method import Method
+from .solver import SimulationResult
 
-def save_simulation(
-    path: str,
-    t: np.ndarray,
-    y: np.ndarray,
-    system: ExchangeSystem,
-    method: Method,
-):
+# Figure out the project root by walking up from here:
+# src/chromatography_sim/io.py → chromatography_sim → src → <project root>
+_PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
+
+def save_simulation(rel_path: str, result: SimulationResult):
+    # unpack
+    t, y, system, method = result.t, result.y, result.system, result.method
     """
-    Save only the essentials:
-      - t: 1D time vector
-      - y: 2D state array
-      - system: ExchangeSystem (we call .to_dict())
-      - method: Method (we pull buffers & blocks)
-    Fails if files already exist.
+    Save t, y, system, method under PROJECT_ROOT/rel_path(.npz/.json).
+    rel_path is interpreted relative to the project root.
     """
-    base      = Path(path)
+    base      = _PROJECT_ROOT / rel_path
     npz_path  = base.with_suffix('.npz')
     json_path = base.with_suffix('.json')
 
+    # ensure the directory exists
+    npz_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # abort if either file already exists
     if npz_path.exists() or json_path.exists():
         raise FileExistsError(f"Won’t overwrite {npz_path} or {json_path}")
 
-    # 1) numeric arrays
+    # save the arrays
     np.savez(npz_path, t=t, y=y)
 
-    # 2) metadata from your objects
+    # save minimal metadata
     meta = {
         "system": system.to_dict(),
         "method": {
             "buffers": method.buffers,
-            "blocks":  method.blocks
+            "blocks":  method.blocks,
         }
     }
     with open(json_path, 'w') as f:
         json.dump(meta, f, indent=2)
 
 
-def load_simulation(path: str) -> Tuple[np.ndarray, np.ndarray, ExchangeSystem, Method]:
+def load_simulation(rel_path: str) -> SimulationResult:
     """
-    Returns (t, y, system, method).
-    Rebuilds ExchangeSystem via from_dict, and Method by passing buffers/blocks back in.
+    Load a saved SimulationResult from
+      PROJECT_ROOT/rel_path.npz  (arrays)
+      PROJECT_ROOT/rel_path.json (metadata)
+    Returns a SimulationResult(t, y, system, method).
     """
-    base = Path(path)
-    data = np.load(base.with_suffix('.npz'))
-    with open(base.with_suffix('.json')) as f:
+    base      = _PROJECT_ROOT / rel_path
+    npz_path  = base.with_suffix('.npz')
+    json_path = base.with_suffix('.json')
+
+    # load arrays
+    data = np.load(npz_path)
+    t = data["t"]
+    y = data["y"]
+
+    # load metadata
+    with open(json_path, 'r') as f:
         meta = json.load(f)
 
-    # Reconstruct system & method
+    # reconstruct system
     system = ExchangeSystem.from_dict(meta["system"])
-    meth_meta = meta["method"]
-    method = Method(meth_meta["buffers"], meth_meta["blocks"])
 
-    return data['t'], data['y'], system, method
+    # reconstruct method
+    m = meta["method"]
+    method = Method(m["buffers"], m["blocks"])
+
+    return SimulationResult(t=t, y=y, system=system, method=method)

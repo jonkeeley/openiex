@@ -1,4 +1,6 @@
 import numpy as np
+from typing import Any
+from dataclasses import dataclass
 from scipy.integrate import solve_ivp
 from .state import unpack_state, pack_state
 from .physics import calc_Qbar, calc_dQdt, calc_dCdt
@@ -9,6 +11,14 @@ try:
 except ImportError:
     # Otherwise, use the standard console one
     from tqdm import tqdm
+from typing import Tuple
+
+@dataclass
+class SimulationResult:
+    t: np.ndarray
+    y: np.ndarray
+    system: ExchangeSystem
+    method: Method
 
 class SimulationTracker:
     def __init__(self, t_final):
@@ -53,28 +63,14 @@ class ODEFunction:
 
 
 def run_simulation(
-    chromat_method: Method,
-    system: ExchangeSystem,
     y0: np.ndarray,
     t_eval: np.ndarray,
+    chromat_method: Method,
+    system: ExchangeSystem,
     integrator: str = "BDF",
     **ivp_kwargs
-):
-    """
-    High‑level helper: wraps ODEFunction + solve_ivp + progress bar.
-    
-    Args:
-      chromat_method: your Method(buffers, blocks)
-      system:           ExchangeSystem(...)
-      y0:               initial state vector
-      t_eval:           times at which to store solution
-      integrator:       one of scipy's methods, e.g. "RK45" or "BDF"
-      **ivp_kwargs:     other solve_ivp args (rtol, atol, max_step...)
-    
-    Returns the SolveResult with .t, .y, .nfev, etc.
-    """
+) -> SimulationResult:
     ode_fn = ODEFunction(chromat_method, system)
-
     sol = solve_ivp(
         fun=ode_fn,
         t_span=(t_eval[0], t_eval[-1]),
@@ -83,6 +79,103 @@ def run_simulation(
         method=integrator,
         **ivp_kwargs
     )
-
     ode_fn.close()
-    return sol
+    return SimulationResult(sol.t, sol.y, system, chromat_method)
+
+def resume_simulation(
+    prev_result: SimulationResult,
+    t_eval: np.ndarray,
+    chromat_method: Method,
+    system: ExchangeSystem,
+    *,
+    t_start: float = None,
+    integrator: str = "BDF",
+    **ivp_kwargs: Any
+) -> SimulationResult:
+    """
+    Resume a previous SimulationResult at time t_start (absolute),
+    then run a new method over t_eval (which is relative, from 0→new_t_final),
+    stitch the trajectories, and return a new SimulationResult.
+
+    Args:
+      prev_result:     the original SimulationResult
+      t_eval:          1D array of new times from 0 → new_t_final
+      chromat_method:  Method for the continuation (buffers must match prev_result.method.buffers)
+      system:          your ExchangeSystem instance (must equal prev_result.system)
+    Keyword Args:
+      t_start:         absolute time in prev_result.t to resume from;
+                       if None, defaults to prev_result.t[-1]
+      integrator:      scipy integrator name (e.g. "BDF", "RK45")
+      **ivp_kwargs:    passed through to run_simulation (rtol, atol, max_step…)
+
+    Returns:
+      SimulationResult with:
+        - t:      concatenated absolute times [0…t_start…t_start+t_eval[-1]]
+        - y:      concatenated state array
+        - system: same ExchangeSystem
+        - method: a Method whose blocks = [truncated_old_block] + chromat_method.blocks
+    """
+    # unpack the old result
+    t_old, y_old, old_system, old_method = (
+        prev_result.t,
+        prev_result.y,
+        prev_result.system,
+        prev_result.method,
+    )
+
+    # 1) sanity checks
+    if system != old_system:
+        raise ValueError("The provided system must match prev_result.system.")
+    if chromat_method.buffers != old_method.buffers:
+        raise ValueError("Buffers of the new method must match the old method.")
+
+    # 2) pick t_start
+    if t_start is None:
+        t_start = t_old[-1]
+
+    # 3) find which block covers t_start and truncate it
+    block_start = 0.0
+    truncated = None
+    for blk in old_method.blocks:
+        flow = blk["flow_rate_mL_min"] * 1.667e-8
+        dur  = blk["duration_CV"] * system.config.vol_column / flow
+        block_end = block_start + dur
+
+        # allow t_start == block_end for the last block
+        if block_start <= t_start <= block_end:
+            frac = (t_start - block_start) / dur if dur>0 else 1.0
+            truncated = {
+                "buffer_A":    blk["buffer_A"],
+                "buffer_B":    blk["buffer_B"],
+                "start_B":     blk["start_B"],
+                "end_B":       blk["start_B"] + frac*(blk["end_B"] - blk["start_B"]),
+                "duration_CV": blk["duration_CV"] * frac,
+                "flow_rate_mL_min": blk["flow_rate_mL_min"],
+            }
+            break
+        block_start = block_end
+
+    if truncated is None:
+        raise ValueError(f"t_start={t_start} is outside the old method blocks.")
+
+    # 4) build the combined Method
+    combined_blocks = [truncated] + chromat_method.blocks
+    method_combined = Method(chromat_method.buffers, combined_blocks)
+
+    # 5) extract the state at t_start
+    idx = np.searchsorted(t_old, t_start, side="left")
+    if idx==len(t_old) or not np.isclose(t_old[idx], t_start):
+        raise ValueError("t_start must exactly match a point in prev_result.t")
+    y0 = y_old[:, idx]
+
+    # 6) shift t_eval into absolute time and rerun
+    t_abs = t_start + t_eval
+    res_new = run_simulation(y0, t_abs, method_combined, system,
+                             integrator=integrator, **ivp_kwargs)
+
+    # 7) stitch the old and new segments (dropping duplicate at idx)
+    t_comb = np.concatenate([t_old[:idx], res_new.t])
+    y_comb = np.concatenate([y_old[:, :idx], res_new.y], axis=1)
+
+    return SimulationResult(t=t_comb, y=y_comb,
+                            system=system, method=method_combined)
