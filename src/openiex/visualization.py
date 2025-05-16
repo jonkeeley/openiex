@@ -1,252 +1,373 @@
 import numpy as np
 import matplotlib.pyplot as plt
-from typing import Union, Tuple, Optional
+from matplotlib.gridspec import GridSpec
+from typing import Union, Tuple, Optional, List, Literal
+import pandas as pd
 from .state    import unpack_state
 from .solver   import SimulationResult
-from .method   import get_feed
+from .method   import get_feed, convert_units
+from .analysis import compute_chromatogram, generate_fraction_dataframe
 
+
+def plot_fraction_table(df: pd.DataFrame, ax: plt.Axes) -> None:
+    """
+    Render a pandas DataFrame as a table on the given Matplotlib Axes,
+    formatting numeric entries as before and auto‐sizing columns so
+    headers don’t overflow.
+    """
+    # 1) Build the display text (unchanged)
+    display_vals = []
+    for row in df.itertuples(index=False):
+        disp_row = []
+        for col_name, val in zip(df.columns, row):
+            if isinstance(val, (int, float)):
+                if col_name in ("Mean Concentration", "Total Amount"):
+                    disp_row.append(f"{val:.4e}")
+                else:
+                    disp_row.append(f"{val:.3f}")
+            else:
+                disp_row.append(str(val))
+        display_vals.append(disp_row)
+
+    ax.axis("off")
+
+    # 2) Create the table
+    table = ax.table(
+        cellText=display_vals,
+        colLabels=df.columns,
+        cellLoc="center",
+        loc="center"
+    )
+
+    # 3) Styling and font
+    table.auto_set_font_size(False)
+    table.set_fontsize(8)
+
+    # 4) Auto‐set each column’s width so header fits
+    ncols = len(df.columns)
+    table.auto_set_column_width(col=list(range(ncols)))
+
+    # 5) Slightly increase vertical spacing
+    table.scale(1, 1.5)
 
 def plot_single_species(
     result: SimulationResult,
     species: str,
     bound: bool = False,
-    z_location: Union[str,int] = "outlet",
+    z_location: Union[str, int] = "outlet",
     include_feed: bool = False,
-    x_axis: str = "time",                         # one of "time","volume","CV"
-    time_window: Optional[Tuple[float,float]] = None
+    x_axis: Literal["time", "volume", "CV"] = "time",
+    x_window: Optional[Tuple[float, float]] = None,
+    y_axis: Optional[str] = None,
+    y_window: Optional[Tuple[float, float]] = None,
+    data_point: Optional[float] = None,
+    annotate: bool = True,
+    fractions: Optional[List[Tuple[float, float]]] = None
 ):
     """
-    Plot a single species over time at a given z-location.
+    Plot one species’ profile with optional feed overlay, axis‐unit conversion,
+    under‐curve shading for fraction intervals, and a summary table below.
 
     Args:
-      result      : SimulationResult from run_simulation or resume_simulation
-      species     : name of the species to plot
-      bound       : if True, plot the bound (Q) profile; else mobile (C)
-      z_location  : "inlet", "outlet", or integer index for axial segment
-      include_feed: if True, overlay the inlet feed concentration
-      x_axis      : "time"      -> plot vs. t (s)
-                    "volume"    -> cumulative mL passed
-                    "CV"        -> CV units (fraction of bed volume)
-      time_window : (min,max) in **seconds** to zoom in (applies before x-axis conversion)
+      result      : SimulationResult
+      species     : species key in result.system.species
+      bound       : if True, plot bound (Q); else mobile (C)
+      z_location  : 'inlet','outlet', or axial index
+      include_feed: overlay inlet-feed concentration
+      x_axis      : 'time','volume','CV'
+      x_window    : (min,max) on chosen x-axis
+      y_axis      : None (native unit), 'M', or 'particles/mL'
+      y_window    : (min,max) on chosen y-axis
+      data_point  : single x-axis value to highlight
+      annotate    : box‐annotate highlighted point
+      fractions   : list of (start,stop) windows → shade + table
     """
-    # unpack
-    t   = result.t
+    # 1) unpack profile
     C, Q = unpack_state(result.y, result.system)
+    prof = Q if bound else C
 
-    # pick which profile dict
-    profiles = Q if bound else C
-
-    # determine z-index
+    # 2) determine z-index
     if z_location == "inlet":
-        z_idx = 0
-        loc_str = "Inlet"
+        z_idx, loc_str = 0, "Inlet"
     elif z_location == "outlet":
-        z_idx = -1
-        loc_str = "Outlet"
+        z_idx, loc_str = -1, "Outlet"
     elif isinstance(z_location, int):
-        z_idx = z_location
-        loc_str = f"z={z_location}"
+        z_idx, loc_str = z_location, f"z={z_location}"
     else:
         raise ValueError("z_location must be 'inlet','outlet', or int")
 
-    # possibly apply time_window mask first
-    mask = np.ones_like(t, dtype=bool)
-    if time_window is not None:
-        tmin, tmax = time_window
-        mask = (t >= tmin) & (t <= tmax)
+    # 3) compute global axes
+    d    = compute_chromatogram(result)
+    t    = d["t"];    vol  = d["vol"];   cv   = d["cv"]
 
-    t_plot = t[mask]
-    y_plot = profiles[species][z_idx][mask]
-
-    # compute x-axis
+    # 4) select x-axis
     if x_axis == "time":
-        x = t_plot
-        xlabel = "Time (s)"
+        x, xlabel = t, "Time (s)"
+    elif x_axis == "volume":
+        x, xlabel = vol, "Injected Volume (mL)"
+    elif x_axis == "CV":
+        x, xlabel = cv, "Column Volumes (CV)"
     else:
-        # get flow_rate at each t for cumulative volume
-        feeds = [get_feed(ti, result.method, result.system)[1] for ti in t_plot]
-        # flow_rate is in m3/s; convert to mL/s
-        flow_mL = np.array(feeds) * 1e6
-        # cumulative trapezoidal integration to get mL
-        vol_mL = np.concatenate([[0], np.cumsum((flow_mL[1:]+flow_mL[:-1])/2 * np.diff(t_plot))])
-        if x_axis == "volume":
-            x     = vol_mL
-            xlabel = "Injected Volume (mL)"
-        elif x_axis == "CV":
-            Vbed_m3 = result.system.config.vol_column
-            Vbed_mL = Vbed_m3 * 1e6
-            x     = vol_mL / Vbed_mL
-            xlabel = "Column Volumes (CV)"
-        else:
-            raise ValueError("x_axis must be 'time','volume', or 'CV'")
+        raise ValueError("x_axis must be 'time','volume', or 'CV'")
 
-    # start plotting
-    fig, ax = plt.subplots()
-    ax.plot(x, y_plot, label=f"{species} ({loc_str})")
+    # 5) apply x_window mask
+    mask = np.ones_like(x, bool)
+    if x_window:
+        xmin, xmax = x_window
+        mask = (x >= xmin) & (x <= xmax)
 
-    # overlay feed if requested
+    x_p = x[mask]
+    y_nat = prof[species][z_idx]
+    y_p   = y_nat[mask]
+
+    # 6) y-axis conversion
+    if y_axis == "M":
+        y_p = convert_units({species:y_p}, result.system, "to_M")[species]
+        ylabel = "Concentration (M)"
+    elif y_axis == "particles/mL":
+        y_p = convert_units({species:y_p}, result.system, "from_M")[species]
+        ylabel = "Concentration (particles/mL)"
+    else:
+        unit = result.system.species[species].unit
+        ylabel = f"Concentration ({unit})"
+
+    # 7) set up figure with optional table
+    if fractions:
+        fig = plt.figure(constrained_layout=True, figsize=(8, 6))
+        gs  = GridSpec(2, 1, height_ratios=[3, 1], figure=fig)
+        ax  = fig.add_subplot(gs[0])
+        ax_t= fig.add_subplot(gs[1])
+    else:
+        fig, ax = plt.subplots(figsize=(8, 5))
+        ax_t = None
+
+    # 8) plot profile
+    ax.plot(x_p, y_p, color="tab:blue", lw=1.5, label=species)
+
+    # 9) overlay feed
     if include_feed:
-        feed_conc = []
-        for ti in t_plot:
-            feed, _ = get_feed(ti, result.method, result.system)
-            feed_conc.append(feed[species])
-        ax.plot(x, feed_conc, "--", label=f"{species} feed")
+        t_p = t[mask]
+        feed_vals = []
+        for ti in t_p:
+            feed_c, _ = get_feed(ti, result.method, result.system)
+            fc = feed_c[species]
+            # convert if needed
+            if y_axis == "particles/mL":
+                fc = convert_units({species: np.array([fc])},
+                                   result.system, "from_M")[species][0]
+            elif y_axis is None and result.system.species[species].unit=="particles/mL":
+                fc = convert_units({species: np.array([fc])},
+                                   result.system, "from_M")[species][0]
+            feed_vals.append(fc)
+        ax.plot(x_p, feed_vals, "--", color="gray", label=f"{species} feed")
 
+    # 10) shade fractions under curve
+    if fractions:
+        for (start, stop) in fractions:
+            mask_f = (x_p >= start) & (x_p <= stop)
+            ax.fill_between(
+                x_p, 0, y_p, where=mask_f,
+                color="lightgrey", alpha=0.3
+            )
+
+    # 11) highlight data_point
+    if data_point is not None:
+        idx = np.abs(x_p - data_point).argmin()
+        xv, yv = x_p[idx], y_p[idx]
+        ax.axvline(xv, color="gray", linestyle="--")
+        if annotate:
+            ax.scatter([xv], [yv], color="red", zorder=3)
+            unitlbl = {"time":"Time","volume":"Volume","CV":"CV"}[x_axis]
+            txt = f"{unitlbl}: {xv:.3g}\n{species}: {yv:.3g}"
+            ax.text(
+                xv, yv, txt,
+                ha="left", va="bottom", fontsize=9,
+                bbox=dict(boxstyle="round", facecolor="white", alpha=0.8)
+            )
+
+    # 12) styling
     ax.set_xlabel(xlabel)
-    ylabel = ("Bound" if bound else "Mobile") + " Concentration (M)"
     ax.set_ylabel(ylabel)
-    ax.set_title(f"{ylabel} at {loc_str}")
-    ax.legend()
+    if x_window: ax.set_xlim(x_window)
+    if y_window: ax.set_ylim(y_window)
+    ax.set_title(f"{species} ({'Bound' if bound else 'Mobile'}) at {loc_str}")
     ax.grid(True)
-    plt.tight_layout()
-    plt.show()
+    ax.legend()
 
+    # 13) fraction table
+    if fractions and ax_t:
+        df_frac = generate_fraction_dataframe(
+            result, x_axis, fractions, species=[species]
+        )
+        plot_fraction_table(df_frac, ax_t)
+
+    plt.show()
 
 def plot_chromatogram(
     result: SimulationResult,
     x_axis: str = "time",
-    time_window: Optional[Tuple[float, float]] = None,
+    x_window: Optional[Tuple[float, float]] = None,
     y_axis: str = "UV",
     y_window: Optional[Tuple[float, float]] = None,
-    t_data_points: Optional[float] = None,
-    annotate: bool = True
+    data_point: Optional[float] = None,
+    annotate: bool = True,
+    plot_uv260: bool = True,
+    plot_uv280: bool = True,
+    plot_conductivity: bool = True,
+    plot_percent_B: bool = True,
+    fractions: Optional[List[Tuple[float, float]]] = None,
+    frac_species: Optional[List[str]] = None
 ):
     """
-    Plot a single chromatogram trace based on y_axis selection.
+    Plot overlaid chromatogram traces and optional fraction table,
+    with vertical lines marking each fraction interval.
 
     Args:
-      result      : SimulationResult
-      x_axis      : "time", "volume", or "CV"
-      time_window : (t_min, t_max) in seconds to restrict the plot
-      y_axis      : which signal to plot: "UV", "cond", or "percent_B";
-                    default "UV" plots both A260 & A280
-      y_window    : (y_min, y_max) to zoom y-axis in selected units
-      t_data_points: time to highlight with vertical line and annotation
-      annotate    : whether to show annotation box at highlight
+      result            : SimulationResult
+      x_axis            : "time", "volume", or "CV"
+      x_window          : (min, max) in chosen x units for zoom
+      y_axis            : baseline scale: "UV", "cond", or "%B"/"percent_B"
+      y_window          : (min, max) in chosen y units for zoom
+      data_point        : x-axis value to highlight
+      annotate          : show boxed annotation at data_point
+      plot_uv260        : include A260
+      plot_uv280        : include A280
+      plot_conductivity : include conductivity
+      plot_percent_B    : include %B
+      fractions         : list of (start,stop) windows in x units;
+                           draws lines and shows a table below
     """
-    # raw time & concentrations
-    t = result.t
-    C, _ = unpack_state(result.y, result.system)
+    # 1) compute all traces & axes
+    d    = compute_chromatogram(result)
+    t    = d["t"];    vol  = d["vol"];   cv   = d["cv"]
+    A260 = d["A260"]; A280 = d["A280"]; cond = d["cond"]; B    = d["percent_B"]
 
-    # apply time window
-    mask = np.ones_like(t, dtype=bool)
-    if time_window:
-        tmin, tmax = time_window
-        mask = (t >= tmin) & (t <= tmax)
-    t_plot = t[mask]
+    # 2) pick x-axis
+    if x_axis == "time":
+        x, xlabel = t, "Time (s)"
+    elif x_axis == "volume":
+        x, xlabel = vol, "Injected Volume (mL)"
+    elif x_axis == "CV":
+        x, xlabel = cv, "Column Volumes (CV)"
+    else:
+        raise ValueError("x_axis must be 'time','volume', or 'CV'")
 
-    # pre-allocate
-    A260 = A280 = cond = percB = None
+    # 3) mask by x_window
+    mask = np.ones_like(x, dtype=bool)
+    if x_window:
+        xmin, xmax = x_window
+        mask = (x >= xmin) & (x <= xmax)
+    x_p  = x[mask]
+    A260_p = A260[mask]; A280_p = A280[mask]
+    cond_p = cond[mask]; B_p     = B[mask]
 
-    # compute based on y_axis
+    # 4) scale onto y_axis baseline
     if y_axis.upper() == "UV":
-        A260 = np.zeros_like(t_plot)
-        A280 = np.zeros_like(t_plot)
-        for i, ti in enumerate(t_plot):
-            idx = np.where(t == ti)[0][0]
-            out = -1
-            for name, conc in C.items():
-                sp = result.system.species[name]
-                c = conc[out, idx]
-                A260[i] += sp.ext_coeff_260 * c
-                A280[i] += sp.ext_coeff_280 * c
+        base = max(A260.max(), A280.max()) or 1.0
+        cond_s = cond / (cond.max() or 1.0) * base
+        B_s    = B    / 100                   * base
+        traces = [
+            ("A260", A260_p, plot_uv260, "purple"),
+            ("A280", A280_p, plot_uv280, "blue"),
+            ("Cond", cond_s[mask], plot_conductivity, "orange"),
+            ("%B",   B_s[mask],    plot_percent_B, "green"),
+        ]
         ylabel = "Absorbance (AU)"
 
     elif y_axis.lower() == "cond":
-        # conductivity: λ (S·cm²/mol) * C (M) gives mS/cm directly
-        cond = np.zeros_like(t_plot)
-        for i, ti in enumerate(t_plot):
-            idx = np.where(t == ti)[0][0]
-            out = -1
-            for name, conc in C.items():
-                sp = result.system.species[name]
-                c = conc[out, idx]
-                cond[i] += sp.mol_cond * c
+        base  = cond.max() or 1.0
+        A260_s = A260 / (A260.max() or 1.0) * base
+        A280_s = A280 / (A280.max() or 1.0) * base
+        B_s     = B    / 100                   * base
+        traces = [
+            ("A260", A260_s[mask], plot_uv260, "purple"),
+            ("A280", A280_s[mask], plot_uv280, "blue"),
+            ("Cond", cond_p,        plot_conductivity, "orange"),
+            ("%B",   B_s[mask],     plot_percent_B, "green"),
+        ]
         ylabel = "Conductivity (mS/cm)"
 
-    elif y_axis == "%B" or y_axis.lower() == "percent_B":
-        percB = []
-        Vcol = result.system.config.vol_column
-        for ti in t_plot:
-            bs = 0.0
-            for blk in result.method.blocks:
-                flow = blk["flow_rate_mL_min"] * 1.667e-8
-                dur = blk["duration_CV"] * Vcol / flow
-                if bs <= ti < bs + dur:
-                    frac = (ti - bs) / dur
-                    pB = blk["start_B"] + frac*(blk["end_B"]-blk["start_B"])
-                    percB.append(pB*100)
-                    break
-                bs += dur
-            else:
-                percB.append(result.method.blocks[-1]["end_B"]*100)
-        percB = np.array(percB)
+    elif y_axis in ("%B","percent_B"):
+        base   = 100.0
+        A260_s = A260 / (A260.max() or 1.0) * base
+        A280_s = A280 / (A280.max() or 1.0) * base
+        cond_s = cond / (cond.max()   or 1.0) * base
+        traces = [
+            ("A260", A260_s[mask], plot_uv260, "purple"),
+            ("A280", A280_s[mask], plot_uv280, "blue"),
+            ("Cond", cond_s[mask], plot_conductivity, "orange"),
+            ("%B",   B_p,           plot_percent_B, "green"),
+        ]
         ylabel = "%B"
 
     else:
-        raise ValueError("y_axis must be 'UV', 'cond', or '%B'/'percent_B'")
+        raise ValueError("y_axis must be 'UV','cond', or '%B'/'percent_B'")
 
-    # build x-axis
-    if x_axis == "time":
-        x = t_plot
-        xlabel = "Time (s)"
+    # 5) create figure + axes (with space for table)
+    if fractions:
+        fig = plt.figure(constrained_layout=True, figsize=(10, 8))
+        gs  = GridSpec(2, 1, height_ratios=[3, 1], figure=fig)
+        ax  = fig.add_subplot(gs[0])
+        ax_t= fig.add_subplot(gs[1])
     else:
-        flows = np.array([get_feed(ti, result.method, result.system)[1] for ti in t_plot])
-        flow_ml_s = flows * 1e6
-        vol = np.concatenate((
-            [0.0], np.cumsum((flow_ml_s[1:]+flow_ml_s[:-1])/2 * np.diff(t_plot))
-        ))
-        if x_axis == "volume":
-            x = vol
-            xlabel = "Injected Volume (mL)"
-        elif x_axis == "CV":
-            Vbed_ml = result.system.config.vol_column * 1e6
-            x = vol / Vbed_ml
-            xlabel = "Column Volumes (CV)"
-        else:
-            raise ValueError("x_axis must be 'time','volume', or 'CV'")
+        fig, ax = plt.subplots(figsize=(10, 6))
+        ax_t = None
 
-    # plot
-    fig, ax = plt.subplots(figsize=(10,6))
-    colors = {'UV260':'purple','UV280':'blue','cond':'orange','%B':'green'}
-    if y_axis.upper() == "UV":
-        ax.plot(x, A260, label='A260', color=colors['UV260'])
-        ax.plot(x, A280, label='A280', color=colors['UV280'])
-    elif y_axis.lower() == 'cond':
-        ax.plot(x, cond, label='Conductivity', color=colors['cond'])
-    else:
-        ax.plot(x, percB, label='%B', color=colors['%B'])
+    # 6) plot each trace
+    for label, arr, show, color in traces:
+        if show:
+            ax.plot(x_p, arr, label=label, color=color)
 
     ax.set_xlabel(xlabel)
     ax.set_ylabel(ylabel)
     ax.grid(True)
     ax.legend()
 
-    # apply y-window if given
+    # 7) horizontal & vertical zoom
     if y_window:
-        ymin, ymax = y_window
-        ax.set_ylim(ymin, ymax)
+        ax.set_ylim(y_window)
 
-    # highlight
-    if t_data_points is not None:
-        idx = np.abs(t_plot - t_data_points).argmin()
-        xt = x[idx]
-        ax.axvline(xt, color='gray', linestyle='--')
+    # 8) draw fraction lines & labels
+    if fractions:
+        # get current y‐limits so spans fill the whole height
+        ymin, ymax = ax.get_ylim()
+        for i, (start, stop) in enumerate(fractions, 1):
+            # light grey shading between start and stop
+            ax.axvspan(start, stop, ymin=0, ymax=1,
+                       color="lightgrey", alpha=0.2)
+            # boundary lines
+            ax.axvline(start, color="gray", linestyle="--", linewidth=1)
+            ax.axvline(stop,  color="gray", linestyle="--", linewidth=1)
+            # label in the middle, just above the top of the plot
+            mid = 0.5*(start + stop)
+            ax.text(mid, ymax, str(i),
+                    ha="center", va="bottom",
+                    fontsize=9,
+                    bbox=dict(boxstyle="round", facecolor="white", alpha=0.7))
+
+    # 9) highlight single data_point
+    if data_point is not None:
+        idx = np.abs(x_p - data_point).argmin()
+        xv  = x_p[idx]
+        ax.axvline(xv, color="black", linestyle=":")
         if annotate:
-            vals = {}
-            if A260 is not None:
-                vals['A260'] = A260[idx]
-                vals['A280'] = A280[idx]
-            if cond is not None:
-                vals['Conductivity'] = cond[idx]
-            if percB is not None:
-                vals['%B'] = percB[idx]
-            vals['t'] = t_plot[idx]
-            txt = '\n'.join(f"{k}: {v:.3g}" for k, v in vals.items())
-            ax.text(0.02,0.95,txt,transform=ax.transAxes,
-                    fontsize=9,verticalalignment='top',
-                    bbox=dict(boxstyle='round',facecolor='wheat',alpha=0.5))
+            unitlbl = {"time":"Time","volume":"Volume","CV":"CV"}[x_axis]
+            lines = [f"{unitlbl}: {xv:.3g}"]
+            if plot_uv260:        lines.append(f"A260: {A260_p[idx]:.3g}")
+            if plot_uv280:        lines.append(f"A280: {A280_p[idx]:.3g}")
+            if plot_conductivity: lines.append(f"Cond: {cond_p[idx]:.3g}")
+            if plot_percent_B:    lines.append(f"%B:   {B_p[idx]:.3g}")
+            ax.text(0.02, 0.95, "\n".join(lines),
+                    transform=ax.transAxes,
+                    fontsize=9, va="top",
+                    bbox=dict(boxstyle="round", facecolor="wheat", alpha=0.5))
 
-    plt.tight_layout()
+    # 10) plot fraction summary table
+    if fractions and ax_t:
+        df_frac = generate_fraction_dataframe(result,
+                                              x_axis,
+                                              fractions,
+                                              species=frac_species)
+        plot_fraction_table(df_frac, ax_t)
+
     plt.show()
-
