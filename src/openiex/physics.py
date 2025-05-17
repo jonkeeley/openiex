@@ -44,8 +44,8 @@ def calc_dQdt(C, Q, Qbar, feed, system):
         # Protein–ion exchange
             nu_j = system.proteins[j].nu
             for i in system.ions.keys():
-                dQdt[i][z_idx] += system.k_ads[(j, i)] * C[j][z_idx] * (Qbar[i][z_idx] ** nu_j)
-                dQdt[i][z_idx] -= system.k_des[(j, i)] * Q[j][z_idx] * (C[i][z_idx] ** nu_j)
+                dQdt[j][z_idx] += system.k_ads[(j, i)] * C[j][z_idx] * (Qbar[i][z_idx] ** nu_j)
+                dQdt[j][z_idx] -= system.k_des[(j, i)] * Q[j][z_idx] * (C[i][z_idx] ** nu_j)
     
     # Scale by residence time
     for s in dQdt:
