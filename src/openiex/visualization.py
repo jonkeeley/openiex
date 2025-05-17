@@ -58,35 +58,25 @@ def plot_single_species(
     include_feed: bool = False,
     x_axis: Literal["time", "volume", "CV"] = "time",
     x_window: Optional[Tuple[float, float]] = None,
-    y_axis: Optional[str] = None,
+    y_axis: Optional[Literal["M", "particles/mL"]] = None,
     y_window: Optional[Tuple[float, float]] = None,
     data_point: Optional[float] = None,
     annotate: bool = True,
     fractions: Optional[List[Tuple[float, float]]] = None
 ):
     """
-    Plot one species’ profile with optional feed overlay, axis‐unit conversion,
-    under‐curve shading for fraction intervals, and a summary table below.
-
-    Args:
-      result      : SimulationResult
-      species     : species key in result.system.species
-      bound       : if True, plot bound (Q); else mobile (C)
-      z_location  : 'inlet','outlet', or axial index
-      include_feed: overlay inlet-feed concentration
-      x_axis      : 'time','volume','CV'
-      x_window    : (min,max) on chosen x-axis
-      y_axis      : None (native unit), 'M', or 'particles/mL'
-      y_window    : (min,max) on chosen y-axis
-      data_point  : single x-axis value to highlight
-      annotate    : box‐annotate highlighted point
-      fractions   : list of (start,stop) windows → shade + table
+    Plot one species’ mobile or bound profile, with:
+      - unit conversion (M or particles/mL or native)
+      - optional feed overlay
+      - optional shading for fraction intervals
+      - optional highlight & annotation of a data point
+      - optional fraction‐summary table beneath
     """
-    # 1) unpack profile
+    # 1) unpack mobile or bound
     C, Q = unpack_state(result.y, result.system)
-    prof = Q if bound else C
+    profile = Q if bound else C
 
-    # 2) determine z-index
+    # 2) resolve z‐location
     if z_location == "inlet":
         z_idx, loc_str = 0, "Inlet"
     elif z_location == "outlet":
@@ -94,13 +84,13 @@ def plot_single_species(
     elif isinstance(z_location, int):
         z_idx, loc_str = z_location, f"z={z_location}"
     else:
-        raise ValueError("z_location must be 'inlet','outlet', or int")
+        raise ValueError("z_location must be 'inlet','outlet', or integer index")
 
     # 3) compute global axes
     d    = compute_chromatogram(result)
     t    = d["t"];    vol  = d["vol"];   cv   = d["cv"]
 
-    # 4) select x-axis
+    # 4) pick x‐axis
     if x_axis == "time":
         x, xlabel = t, "Time (s)"
     elif x_axis == "volume":
@@ -111,85 +101,73 @@ def plot_single_species(
         raise ValueError("x_axis must be 'time','volume', or 'CV'")
 
     # 5) apply x_window mask
-    mask = np.ones_like(x, bool)
+    mask = np.ones_like(x, dtype=bool)
     if x_window:
         xmin, xmax = x_window
         mask = (x >= xmin) & (x <= xmax)
 
-    x_p = x[mask]
-    y_nat = prof[species][z_idx]
+    x_p   = x[mask]
+    y_nat = profile[species][z_idx]
     y_p   = y_nat[mask]
 
+    # 6) unit conversion: always start from M internally
+    #    pick target_unit: explicit y_axis or species.native unit
     target_unit = y_axis or result.system.species[species].unit
-
     if target_unit == "M":
-        # make sure y_p is in M
         y_plot = convert_units({species: y_p}, result.system, direction="to_M")[species]
         ylabel = "Concentration (M)"
-
     elif target_unit == "particles/mL":
-        # convert from M -> particles/mL
         y_plot = convert_units({species: y_p}, result.system, direction="from_M")[species]
         ylabel = "Concentration (particles/mL)"
-
     else:
         raise ValueError("y_axis must be 'M', 'particles/mL', or None")
 
-    # 7) set up figure with optional table
+    # 7) set up figure (with table if needed)
     if fractions:
-        fig = plt.figure(constrained_layout=True, figsize=(8, 6))
-        gs  = GridSpec(2, 1, height_ratios=[3, 1], figure=fig)
+        fig = plt.figure(constrained_layout=True, figsize=(8,6))
+        gs  = GridSpec(2, 1, height_ratios=[3,1], figure=fig)
         ax  = fig.add_subplot(gs[0])
         ax_t= fig.add_subplot(gs[1])
     else:
-        fig, ax = plt.subplots(figsize=(8, 5))
+        fig, ax = plt.subplots(figsize=(8,5))
         ax_t = None
 
-    # 8) plot profile
-    ax.plot(x_p, y_p, color="tab:blue", lw=1.5, label=species)
+    # 8) plot the species profile
+    ax.plot(x_p, y_plot, color="tab:blue", lw=1.5, label=species)
 
-    # 9) overlay feed
+    # 9) overlay feed if requested
     if include_feed:
-        t_p = t[mask]
         feed_vals = []
-        for ti in t_p:
-            feed_c, _ = get_feed(ti, result.method, result.system)
-            fc = feed_c[species]
-            # convert if needed
-            if y_axis == "particles/mL":
-                fc = convert_units({species: np.array([fc])},
-                                   result.system, "from_M")[species][0]
-            elif y_axis is None and result.system.species[species].unit=="particles/mL":
-                fc = convert_units({species: np.array([fc])},
-                                   result.system, "from_M")[species][0]
+        for ti in t[mask]:
+            feed_comp, _ = get_feed(ti, result.method, result.system)
+            fc = feed_comp[species]
+            # convert feed concentration to target unit
+            if target_unit == "particles/mL":
+                fc = convert_units({species: np.array([fc])}, result.system, "from_M")[species][0]
+            # else leave in M
             feed_vals.append(fc)
         ax.plot(x_p, feed_vals, "--", color="gray", label=f"{species} feed")
 
-    # 10) shade fractions under curve
+    # 10) shade fraction intervals
     if fractions:
-        for (start, stop) in fractions:
+        for start, stop in fractions:
             mask_f = (x_p >= start) & (x_p <= stop)
-            ax.fill_between(
-                x_p, 0, y_p, where=mask_f,
-                color="lightgrey", alpha=0.3
-            )
+            ax.fill_between(x_p, 0, y_plot, where=mask_f,
+                            color="lightgrey", alpha=0.3)
 
-    # 11) highlight data_point
+    # 11) highlight & annotate single data_point
     if data_point is not None:
         idx = np.abs(x_p - data_point).argmin()
-        xv, yv = x_p[idx], y_p[idx]
+        xv, yv = x_p[idx], y_plot[idx]
         ax.axvline(xv, color="gray", linestyle="--")
         if annotate:
             ax.scatter([xv], [yv], color="red", zorder=3)
             unitlbl = {"time":"Time","volume":"Volume","CV":"CV"}[x_axis]
             txt = f"{unitlbl}: {xv:.3g}\n{species}: {yv:.3g}"
-            ax.text(
-                xv, yv, txt,
-                ha="left", va="bottom", fontsize=9,
-                bbox=dict(boxstyle="round", facecolor="white", alpha=0.8)
-            )
+            ax.text(xv, yv, txt, ha="left", va="bottom",
+                    fontsize=9, bbox=dict(boxstyle="round", facecolor="white", alpha=0.8))
 
-    # 12) styling
+    # 12) styling & limits
     ax.set_xlabel(xlabel)
     ax.set_ylabel(ylabel)
     if x_window: ax.set_xlim(x_window)
@@ -198,7 +176,7 @@ def plot_single_species(
     ax.grid(True)
     ax.legend()
 
-    # 13) fraction table
+    # 13) optional fraction summary table
     if fractions and ax_t:
         df_frac = generate_fraction_dataframe(
             result, x_axis, fractions, species=[species]
