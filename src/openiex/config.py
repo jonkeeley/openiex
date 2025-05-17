@@ -8,7 +8,7 @@ class SystemConfig:
     Lambda: float                  # ionic capacity [mol/L resin]
     epsilon_i: float               # interstitial void fraction
     epsilon_p: float               # pore void fraction
-    Nz: int = 25                  # number of axial segments
+    Nz: int = 25                   # number of axial segments
 
     @property
     def A(self):
