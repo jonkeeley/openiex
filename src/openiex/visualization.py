@@ -50,6 +50,8 @@ def plot_fraction_table(df: pd.DataFrame, ax: plt.Axes) -> None:
     # 5) Slightly increase vertical spacing
     table.scale(1, 1.5)
 
+_NA = 6.022e23
+
 def plot_single_species(
     result: SimulationResult,
     species: str,
@@ -65,18 +67,19 @@ def plot_single_species(
     fractions: Optional[List[Tuple[float, float]]] = None
 ):
     """
-    Plot one species’ mobile or bound profile, with:
-      - unit conversion (M or particles/mL or native)
+    Plot one species’ profile (mobile or bound) with:
+      - default to the species’ declared unit (None)
+      - or override to "M" or "particles/mL"
       - optional feed overlay
       - optional shading for fraction intervals
-      - optional highlight & annotation of a data point
-      - optional fraction‐summary table beneath
+      - optional data-point annotation
+      - optional fraction‐summary table below
     """
-    # 1) unpack mobile or bound
+    # 1) unpack profiles
     C, Q = unpack_state(result.y, result.system)
-    profile = Q if bound else C
+    prof = Q if bound else C
 
-    # 2) resolve z‐location
+    # 2) resolve z-location
     if z_location == "inlet":
         z_idx, loc_str = 0, "Inlet"
     elif z_location == "outlet":
@@ -84,13 +87,13 @@ def plot_single_species(
     elif isinstance(z_location, int):
         z_idx, loc_str = z_location, f"z={z_location}"
     else:
-        raise ValueError("z_location must be 'inlet','outlet', or integer index")
+        raise ValueError("z_location must be 'inlet','outlet', or int")
 
-    # 3) compute global axes
+    # 3) compute axes
     d    = compute_chromatogram(result)
     t    = d["t"];    vol  = d["vol"];   cv   = d["cv"]
 
-    # 4) pick x‐axis
+    # 4) pick x-axis
     if x_axis == "time":
         x, xlabel = t, "Time (s)"
     elif x_axis == "volume":
@@ -100,29 +103,27 @@ def plot_single_species(
     else:
         raise ValueError("x_axis must be 'time','volume', or 'CV'")
 
-    # 5) apply x_window mask
-    mask = np.ones_like(x, dtype=bool)
+    # 5) apply x_window
+    mask = np.ones_like(x, bool)
     if x_window:
         xmin, xmax = x_window
         mask = (x >= xmin) & (x <= xmax)
 
     x_p   = x[mask]
-    y_nat = profile[species][z_idx]
-    y_p   = y_nat[mask]
+    y_mol = prof[species][z_idx][mask]   # always in M
 
-    # 6) unit conversion: always start from M internally
-    #    pick target_unit: explicit y_axis or species.native unit
-    target_unit = y_axis or result.system.species[species].unit
-    if target_unit == "M":
-        y_plot = convert_units({species: y_p}, result.system, direction="to_M")[species]
-        ylabel = "Concentration (M)"
-    elif target_unit == "particles/mL":
-        y_plot = convert_units({species: y_p}, result.system, direction="from_M")[species]
+    # 6) determine target unit
+    target = y_axis if y_axis else result.system.species[species].unit
+    if target == "M":
+        y_plot, ylabel = y_mol, "Concentration (M)"
+    elif target == "particles/mL":
+        # M → particles/mL
+        y_plot = y_mol * _NA / 1e3
         ylabel = "Concentration (particles/mL)"
     else:
-        raise ValueError("y_axis must be 'M', 'particles/mL', or None")
+        raise ValueError("y_axis must be 'M','particles/mL', or None")
 
-    # 7) set up figure (with table if needed)
+    # 7) set up figure (+ table if needed)
     if fractions:
         fig = plt.figure(constrained_layout=True, figsize=(8,6))
         gs  = GridSpec(2, 1, height_ratios=[3,1], figure=fig)
@@ -132,42 +133,40 @@ def plot_single_species(
         fig, ax = plt.subplots(figsize=(8,5))
         ax_t = None
 
-    # 8) plot the species profile
+    # 8) plot the main trace
     ax.plot(x_p, y_plot, color="tab:blue", lw=1.5, label=species)
 
-    # 9) overlay feed if requested
+    # 9) overlay feed
     if include_feed:
         feed_vals = []
         for ti in t[mask]:
-            feed_comp, _ = get_feed(ti, result.method, result.system)
-            fc = feed_comp[species]
-            # convert feed concentration to target unit
-            if target_unit == "particles/mL":
-                fc = convert_units({species: np.array([fc])}, result.system, "from_M")[species][0]
-            # else leave in M
-            feed_vals.append(fc)
+            feed_c, _ = get_feed(ti, result.method, result.system)
+            val = feed_c[species]  # in M
+            if target == "particles/mL":
+                val = val * _NA / 1e3
+            feed_vals.append(val)
         ax.plot(x_p, feed_vals, "--", color="gray", label=f"{species} feed")
 
-    # 10) shade fraction intervals
+    # 10) shade fractions
     if fractions:
         for start, stop in fractions:
-            mask_f = (x_p >= start) & (x_p <= stop)
-            ax.fill_between(x_p, 0, y_plot, where=mask_f,
+            m_f = (x_p >= start) & (x_p <= stop)
+            ax.fill_between(x_p, 0, y_plot, where=m_f,
                             color="lightgrey", alpha=0.3)
 
-    # 11) highlight & annotate single data_point
+    # 11) highlight data_point
     if data_point is not None:
         idx = np.abs(x_p - data_point).argmin()
         xv, yv = x_p[idx], y_plot[idx]
         ax.axvline(xv, color="gray", linestyle="--")
         if annotate:
             ax.scatter([xv], [yv], color="red", zorder=3)
-            unitlbl = {"time":"Time","volume":"Volume","CV":"CV"}[x_axis]
-            txt = f"{unitlbl}: {xv:.3g}\n{species}: {yv:.3g}"
+            lbl = {"time":"Time","volume":"Volume","CV":"CV"}[x_axis]
+            txt = f"{lbl}: {xv:.3g}\n{species}: {yv:.3g}"
             ax.text(xv, yv, txt, ha="left", va="bottom",
                     fontsize=9, bbox=dict(boxstyle="round", facecolor="white", alpha=0.8))
 
-    # 12) styling & limits
+    # 12) finalize axes
     ax.set_xlabel(xlabel)
     ax.set_ylabel(ylabel)
     if x_window: ax.set_xlim(x_window)
@@ -176,12 +175,12 @@ def plot_single_species(
     ax.grid(True)
     ax.legend()
 
-    # 13) optional fraction summary table
+    # 13) fraction summary table
     if fractions and ax_t:
-        df_frac = generate_fraction_dataframe(
+        df = generate_fraction_dataframe(
             result, x_axis, fractions, species=[species]
         )
-        plot_fraction_table(df_frac, ax_t)
+        plot_fraction_table(df, ax_t)
 
     plt.show()
 
