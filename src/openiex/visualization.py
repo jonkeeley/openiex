@@ -120,17 +120,20 @@ def plot_single_species(
     y_nat = prof[species][z_idx]
     y_p   = y_nat[mask]
 
-    if y_axis == "particles/mL":
-        # convert from M → particles/mL
-        y_p = convert_units({species: y_p}, result.system, direction="from_M")[species]
-        ylabel = "Concentration (particles/mL)"
-    else:
-        # anything else (including y_axis=="M" or None) we leave in M
-        if y_axis not in ("M", None):
-            raise ValueError("y_axis must be 'M' or 'particles/mL'")
-        # ensure it's in M (no-op if it already is)
-        y_p = convert_units({species: y_p}, result.system, direction="to_M")[species]
+    target_unit = y_axis or result.system.species[species].unit
+
+    if target_unit == "M":
+        # make sure y_p is in M
+        y_plot = convert_units({species: y_p}, result.system, direction="to_M")[species]
         ylabel = "Concentration (M)"
+
+    elif target_unit == "particles/mL":
+        # convert from M -> particles/mL
+        y_plot = convert_units({species: y_p}, result.system, direction="from_M")[species]
+        ylabel = "Concentration (particles/mL)"
+
+    else:
+        raise ValueError("y_axis must be 'M', 'particles/mL', or None")
 
     # 7) set up figure with optional table
     if fractions:
