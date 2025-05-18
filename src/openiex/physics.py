@@ -18,38 +18,85 @@ def calc_Qbar(Q, system):
                 Qbar[i][z_idx] = 0.0
     return Qbar
 
-def calc_dQdt(C, Q, Qbar, feed, system):
-    # Add t_res term?
+def calc_Qstar(C, Qbar, system):
+    """
+    Returns:
+      Qstar: dict[j][i] = np.ndarray of length Nz
+    """
+    Nz = system.config.Nz
+    Qstar = {j: {np.zeros(Nz)} for j in system.proteins}
+    for j, prot in system.proteins.items():
+        nu = prot.nu
+        for i in system.ions:
+            # elementwise over z
+            Qstar[j][i] = (
+                system.K_eq[(j,i)]
+                * (Qbar[i]**nu)
+                * C[j]
+                / (C[i]**nu)
+            )
+    return Qstar
+
+def calc_dQdt(C, Q, Qbar, Qstar, feed, system):
+    """
+    Compute dQ/dt using:
+      - SMA (only) for ion–ion
+      - SMA or LDF for protein–ion, with weights from Qstar
+    """
     Nz = system.config.Nz
     _, flow_rate = feed
-    vol_interstitial = system.config.vol_interstitial  # m^3
-    t_res = vol_interstitial / flow_rate
+    t_res = system.config.vol_interstitial / flow_rate
+
+    # initialize output
     dQdt = {s: np.zeros(Nz) for s in system.species}
-    for i in system.ions.keys():
-        for z_idx in range(Nz):
-            # Ion–ion exchange
-            for k in system.ions.keys():
-                if k != i:
-                    dQdt[i][z_idx] += system.k_ads[(i, k)] * C[i][z_idx] * Q[k][z_idx]
-                    dQdt[i][z_idx] -= system.k_des[(i, k)] * Q[i][z_idx] * C[k][z_idx]
 
-            # Protein–ion exchange
-            for j in system.proteins.keys():
-                nu_j = system.proteins[j].nu
-                dQdt[i][z_idx] += system.k_ads[(i, j)] * (C[i][z_idx] ** nu_j) * Q[j][z_idx]
-                dQdt[i][z_idx] -= system.k_des[(i, j)] * Q[i][z_idx] * (C[j][z_idx] ** nu_j)
+    # outer loop over z
+    for z in range(Nz):
+        # 1) protein–ion rates rji[j][i]
+        rji = {j: {} for j in system.proteins}
 
-    for j in system.proteins.keys():
-        for z_idx in range(Nz):
-        # Protein–ion exchange
-            nu_j = system.proteins[j].nu
-            for i in system.ions.keys():
-                dQdt[j][z_idx] += system.k_ads[(j, i)] * C[j][z_idx] * (Qbar[i][z_idx] ** nu_j)
-                dQdt[j][z_idx] -= system.k_des[(j, i)] * Q[j][z_idx] * (C[i][z_idx] ** nu_j)
-    
-    # Scale by residence time
-    for s in dQdt:
-        dQdt[s] /= t_res
+        for j, prot in system.proteins.items():
+            nu = prot.nu
+            sum_r = 0.0
+
+            # pre-sum Qstar[j][i][z] for normalization (avoid zero-div)
+            denom = sum(Qstar[j][i][z] for i in system.ions) or 1e-12
+
+            for i in system.ions:
+                model = system.pair_kinetic_model.get((j, i), system.kinetic_model)
+
+                if model == "SMA":
+                    # mass-action
+                    r = (
+                        system.k_ads[(j, i)] * C[j][z] * (Qbar[i][z] ** nu)
+                        - system.k_des[(j, i)] * Q[j][z] * (C[i][z] ** nu)
+                    )
+                else:
+                    # LDF toward Qstar
+                    w = Qstar[j][i][z] / denom
+                    Qji = w * Q[j][z]
+                    r   = system.k_ldf[(j, i)] * (Qstar[j][i][z] - Qji)
+
+                rji[j][i] = r
+                sum_r     += r
+
+            # protein balance
+            dQdt[j][z] = sum_r / t_res
+        # 2) ion balances
+        for i in system.ions:
+            acc = 0.0
+            # ion–ion (SMA only)
+            for k in system.ions:
+                if k == i:
+                    continue
+                acc += (
+                    system.k_ads[(i, k)] * C[i][z] * Q[k][z]
+                    - system.k_des[(i, k)] * Q[i][z] * C[k][z]
+                )
+            # subtract each protein displacement
+            for j, prot in system.proteins.items():
+                acc -= prot.nu * rji[j][i]
+            dQdt[i][z] = acc / t_res
     return dQdt
 
 def calc_dCdt(C, dQdt, feed, system):

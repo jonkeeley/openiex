@@ -10,22 +10,76 @@ class ExchangeSystem:
         inert: dict[str, Inert],
         config: SystemConfig
     ):
-        self.ions = ions
-        self.proteins = proteins
-        self.inert = inert
-        self.species = {**ions, **proteins, **inert}
-        self.config = config
-        self.K_eq = {}
-        self.k_ads = {}
-        self.k_des = {}
+        self.ions               = ions
+        self.proteins           = proteins
+        self.inert              = inert
+        self.species            = {**ions, **proteins, **inert}
+        self.config             = config
 
-    def set_equilibrium(self, a: str, b: str, K_eq_val: float, k_ads_val: float):
-        self.K_eq[(a, b)] = K_eq_val
-        self.k_ads[(a, b)] = k_ads_val
-        self.k_des[(a, b)] = k_ads_val / K_eq_val
-        self.K_eq[(b, a)] = 1.0 / K_eq_val
-        self.k_ads[(b, a)] = k_ads_val / K_eq_val
-        self.k_des[(b, a)] = k_ads_val
+        # SMA mass‐action storage
+        self.K_eq               = {}
+        self.k_ads              = {}
+        self.k_des              = {}
+
+        # LDF storage (only protein→ion allowed)
+        self.k_ldf              = {}
+
+        # Per‐pair kinetic model: "SMA" or "LDF"
+        self.pair_kinetic_model = {}
+        # Global default ("SMA" or "LDF")
+        self.kinetic_model      = "SMA"
+
+    def set_kinetic_model(self, model: str):
+        model = model.upper()
+        if model not in ("SMA","LDF"):
+            raise ValueError("Must be 'SMA' or 'LDF'")
+        self.kinetic_model = model
+
+    def set_equilibrium(
+        self,
+        a: str,
+        b: str,
+        K_eq_val: float,
+        k_rate_val: float,
+        kinetic_model: str = None
+    ):
+        """
+        Define K_eq and one k_rate for the pair (a,b).
+         - If model=="SMA": symmetric k_ads/k_des for both (a,b) and (b,a).
+         - If model=="LDF": only allowed if a∈proteins and b∈ions; single-direction k_ldf[(a,b)].
+        """
+        model = (kinetic_model or self.kinetic_model).upper()
+        if model not in ("SMA","LDF"):
+            raise ValueError("kinetic_model must be 'SMA' or 'LDF'")
+
+        # Thermodynamics always stored bidirectionally
+        self.K_eq[(a,b)] = K_eq_val
+        self.K_eq[(b,a)] = 1.0 / K_eq_val
+
+        # Record which kinetics to use here
+        self.pair_kinetic_model[(a,b)] = model
+
+        if model == "SMA":
+            # mass‐action forward/backward
+            self.k_ads[(a,b)] = k_rate_val
+            self.k_des[(a,b)] = k_rate_val / K_eq_val
+            self.pair_kinetic_model[(b,a)] = "SMA"
+            self.k_ads[(b,a)] = k_rate_val / K_eq_val
+            self.k_des[(b,a)] = k_rate_val
+            # remove any leftover LDF
+            self.k_ldf.pop((a,b), None)
+            self.k_ldf.pop((b,a), None)
+
+        else:  # model == "LDF"
+            # only allow protein→ion
+            if a not in self.proteins or b not in self.ions:
+                raise ValueError("LDF only allowed for protein→ion pairs (j,i)")
+            self.k_ldf[(a,b)] = k_rate_val
+            # do NOT set (b,a), and do NOT set any SMA rates here
+            self.k_ads.pop((a,b), None)
+            self.k_des.pop((a,b), None)
+            # ensure reverse kinetic_model stays SMA if previously set
+            self.pair_kinetic_model[(b,a)] = "LDF"
 
     def check_equilibria(self):
         missing = []
@@ -88,7 +142,7 @@ class ExchangeSystem:
                 for name, inv in self.inert.items()
             },
             "equilibria": {
-                f"{a}|{b}": {"K_eq": self.K_eq[(a, b)], "k_ads": self.k_ads[(a, b)]}
+                f"{a}|{b}": {"K_eq": self.K_eq[(a, b)], "rate": self.k_rate[(a, b)]}
                 for (a, b) in self.K_eq
             }
         }
@@ -150,5 +204,5 @@ class ExchangeSystem:
         sys = cls(ions, proteins, inert, cfg)
         for key, params in data.get("equilibria", {}).items():
             a, b = key.split("|")
-            sys.set_equilibrium(a, b, params["K_eq"], params["k_ads"])
+            sys.set_equilibrium(a, b, params["K_eq"], params["k_rate"])
         return sys
