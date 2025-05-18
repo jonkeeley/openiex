@@ -23,8 +23,7 @@ def calc_Qstar(C, Qbar, system):
     Returns:
       Qstar: dict[j][i] = np.ndarray of length Nz
     """
-    Nz = system.config.Nz
-    Qstar = {j: {np.zeros(Nz)} for j in system.proteins}
+    Qstar = {j: {} for j in system.proteins}
     for j, prot in system.proteins.items():
         nu = prot.nu
         for i in system.ions:
