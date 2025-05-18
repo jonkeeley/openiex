@@ -18,38 +18,45 @@ def calc_Qbar(Q, system):
                 Qbar[i][z_idx] = 0.0
     return Qbar
 
-def calc_dQdt(C, Q, Qbar, feed, system):
-    # Add t_res term?
+def calc_dQdt(C, Q, Qbar, feed, system, eps=1e-30):
     Nz = system.config.Nz
     _, flow_rate = feed
-    vol_interstitial = system.config.vol_interstitial  # m^3
+    vol_interstitial = system.config.vol_interstitial
     t_res = vol_interstitial / flow_rate
-    dQdt = {s: np.zeros(Nz) for s in system.species}
-    for i in system.ions.keys():
-        for z_idx in range(Nz):
-            # Ion–ion exchange
-            for k in system.ions.keys():
+
+    dQdt = { s: np.zeros(Nz) for s in system.species }
+
+    for i in system.ions:
+        for z in range(Nz):
+            # Ion–ion exchange (log-space)
+            for k in system.ions:
                 if k != i:
-                    dQdt[i][z_idx] += system.k_ads[(i, k)] * C[i][z_idx] * Q[k][z_idx]
-                    dQdt[i][z_idx] -= system.k_des[(i, k)] * Q[i][z_idx] * C[k][z_idx]
+                    expo_ads = system.ln_k_ads[(i, k)] + np.log(np.maximum(C[i][z], eps)) + np.log(np.maximum(Q[k][z], eps))
+                    expo_des = system.ln_k_des[(i, k)] + np.log(np.maximum(Q[i][z], eps)) + np.log(np.maximum(C[k][z], eps))
+                    dQdt[i][z] += np.exp(expo_ads)
+                    dQdt[i][z] -= np.exp(expo_des)
 
-            # Protein–ion exchange
-            for j in system.proteins.keys():
+            # Protein–ion exchange (log-space)
+            for j in system.proteins:
                 nu_j = system.proteins[j].nu
-                dQdt[i][z_idx] += system.k_ads[(i, j)] * (C[i][z_idx] ** nu_j) * Q[j][z_idx]
-                dQdt[i][z_idx] -= system.k_des[(i, j)] * Q[i][z_idx] * (C[j][z_idx] ** nu_j)
+                expo_ads = system.ln_k_ads[(i, j)] + nu_j * np.log(np.maximum(C[i][z], eps)) + np.log(np.maximum(Q[j][z], eps))
+                expo_des = system.ln_k_des[(i, j)] + np.log(np.maximum(Q[i][z], eps)) + nu_j * np.log(np.maximum(C[j][z], eps))
+                dQdt[i][z] += np.exp(expo_ads)
+                dQdt[i][z] -= np.exp(expo_des)
 
-    for j in system.proteins.keys():
-        for z_idx in range(Nz):
-        # Protein–ion exchange
+    for j in system.proteins:
+        for z in range(Nz):
             nu_j = system.proteins[j].nu
-            for i in system.ions.keys():
-                dQdt[j][z_idx] += system.k_ads[(j, i)] * C[j][z_idx] * (Qbar[i][z_idx] ** nu_j)
-                dQdt[j][z_idx] -= system.k_des[(j, i)] * Q[j][z_idx] * (C[i][z_idx] ** nu_j)
-    
+            for i in system.ions:
+                expo_ads = system.ln_k_ads[(j, i)] + np.log(np.maximum(C[j][z], eps)) + nu_j * np.log(np.maximum(Qbar[i][z], eps))
+                expo_des = system.ln_k_des[(j, i)] + np.log(np.maximum(Q[j][z], eps)) + nu_j * np.log(np.maximum(C[i][z], eps))
+                dQdt[j][z] += np.exp(expo_ads)
+                dQdt[j][z] -= np.exp(expo_des)
+
     # Scale by residence time
     for s in dQdt:
         dQdt[s] /= t_res
+
     return dQdt
 
 def calc_dCdt(C, dQdt, feed, system):

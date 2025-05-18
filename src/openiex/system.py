@@ -1,4 +1,4 @@
-import json
+import numpy as np
 from .species import Ion, Protein, Inert
 from .config import SystemConfig
 
@@ -16,16 +16,17 @@ class ExchangeSystem:
         self.species = {**ions, **proteins, **inert}
         self.config = config
         self.K_eq = {}
-        self.k_ads = {}
-        self.k_des = {}
+        self.ln_k_ads = {}
+        self.ln_k_des = {}
 
-    def set_equilibrium(self, a: str, b: str, K_eq_val: float, k_ads_val: float):
-        self.K_eq[(a, b)] = K_eq_val
-        self.k_ads[(a, b)] = k_ads_val
-        self.k_des[(a, b)] = k_ads_val / K_eq_val
-        self.K_eq[(b, a)] = 1.0 / K_eq_val
-        self.k_ads[(b, a)] = k_ads_val / K_eq_val
-        self.k_des[(b, a)] = k_ads_val
+    def set_equilibrium(self, a: str, b: str, K_eq_val: float, ln_k_ads_val: float):
+        ln_K_eq = np.log(K_eq_val)
+        self.K_eq[(a, b)]     = K_eq_val
+        self.ln_k_ads[(a, b)] = ln_k_ads_val
+        self.ln_k_des[(a, b)] = ln_k_ads_val - ln_K_eq
+        self.K_eq[(b, a)]     = 1.0 / K_eq_val
+        self.ln_k_ads[(b, a)] = ln_k_ads_val - ln_K_eq
+        self.ln_k_des[(b, a)] = ln_k_ads_val
 
     def check_equilibria(self):
         missing = []
@@ -88,7 +89,7 @@ class ExchangeSystem:
                 for name, inv in self.inert.items()
             },
             "equilibria": {
-                f"{a}|{b}": {"K_eq": self.K_eq[(a, b)], "k_ads": self.k_ads[(a, b)]}
+                f"{a}|{b}": {"K_eq": self.K_eq[(a, b)], "ln_k_ads": self.ln_k_ads[(a, b)]}
                 for (a, b) in self.K_eq
             }
         }
@@ -150,5 +151,5 @@ class ExchangeSystem:
         sys = cls(ions, proteins, inert, cfg)
         for key, params in data.get("equilibria", {}).items():
             a, b = key.split("|")
-            sys.set_equilibrium(a, b, params["K_eq"], params["k_ads"])
+            sys.set_equilibrium(a, b, params["K_eq"], params["ln_k_ads"])
         return sys
