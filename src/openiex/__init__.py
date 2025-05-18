@@ -4,7 +4,7 @@ from .species         import Ion, Protein, Inert
 from .system          import ExchangeSystem
 from .state           import initialize_state, load_state, unpack_state, pack_state
 from .method          import Method, validate_method, get_feed, convert_units
-from .physics         import calc_Qbar, calc_Qstar, calc_dQdt, calc_dCdt
+from .physics         import calc_Qbar, calc_lnQstar, calc_dQdt, calc_dCdt
 from .solver          import SimulationResult, SimulationTracker, method_duration, ODEFunction, run_simulation, resume_simulation 
 
 # I/O helpers
