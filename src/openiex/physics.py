@@ -28,11 +28,13 @@ def calc_Qstar(C, Qbar, system):
         nu = prot.nu
         for i in system.ions:
             # elementwise over z
+            denom = C[i]**nu
+            denom = np.where(denom > 1e-12, denom, 1e-12)
             Qstar[j][i] = (
                 system.K_eq[(j,i)]
                 * (Qbar[i]**nu)
                 * C[j]
-                / (C[i]**nu)
+                / denom
             )
     return Qstar
 
@@ -45,25 +47,20 @@ def calc_dQdt(C, Q, Qbar, Qstar, feed, system):
     Nz = system.config.Nz
     _, flow_rate = feed
     t_res = system.config.vol_interstitial / flow_rate
-
     # initialize output
     dQdt = {s: np.zeros(Nz) for s in system.species}
-
     # outer loop over z
     for z in range(Nz):
         # 1) protein–ion rates rji[j][i]
         rji = {j: {} for j in system.proteins}
-
         for j, prot in system.proteins.items():
             nu = prot.nu
             sum_r = 0.0
-
             # pre-sum Qstar[j][i][z] for normalization (avoid zero-div)
-            denom = sum(Qstar[j][i][z] for i in system.ions) or 1e-12
-
+            denom = sum(Qstar[j][i][z] for i in system.ions)
+            denom = np.where(denom > 1e-12, denom, 1e-12)
             for i in system.ions:
                 model = system.pair_kinetic_model.get((j, i), system.kinetic_model)
-
                 if model == "SMA":
                     # mass-action
                     r = (
