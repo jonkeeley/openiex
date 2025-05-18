@@ -1,4 +1,5 @@
 import numpy as np
+from scipy.special import logsumexp
 
 def calc_Qbar(Q, system):
     Nz = system.config.Nz
@@ -18,81 +19,94 @@ def calc_Qbar(Q, system):
                 Qbar[i][z_idx] = 0.0
     return Qbar
 
-def calc_Qstar(C, Qbar, system):
+def calc_lnQstar(C, Qbar, system, eps=1e-15):
     """
-    Returns:
-      Qstar: dict[j][i] = np.ndarray of length Nz
+    Compute ln(Q*_{j,i}(z)) for all proteins j and ions i, vectorized over z.
+
+    Q*_{j,i}(z) = K_eq[(j,i)] * Qbar[i,z]^nu_j * C[j,z] / C[i,z]^nu_j
+    We return lnQstar[j][i] = log(Q*_{j,i}(z)), clipped to avoid overflow.
     """
-    Qstar = {j: {} for j in system.proteins}
+    Nz = system.config.Nz
+    lnQstar = {j: {} for j in system.proteins}
+    
     for j, prot in system.proteins.items():
         nu = prot.nu
+        # for each ion, compute ln(Q*)
         for i in system.ions:
-            # elementwise over z
-            denom = C[i]**nu
-            denom = np.where(denom > 1e-12, denom, 1e-12)
-            Qstar[j][i] = (
-                system.K_eq[(j,i)]
-                * (Qbar[i]**nu)
-                * C[j]
-                / denom
-            )
-    return Qstar
+            # logs of each term
+            lnK   = np.log(system.K_eq[(j, i)])
+            lnQb  = nu * np.log(Qbar[i] + eps)
+            lnCj  = np.log(C[j] + eps)
+            lnCi  = nu * np.log(C[i] + eps)
+            
+            # ln(Q*) = lnK + lnQb + lnCj - lnCi
+            ln_val = lnK + lnQb + lnCj - lnCi
+            
+            # clip to safe range
+            ln_val = np.clip(ln_val, -700, 700)
+            
+            lnQstar[j][i] = ln_val
+    
+    return lnQstar
 
-def calc_dQdt(C, Q, Qbar, Qstar, feed, system):
+def calc_dQdt(C, Q, Qbar, lnQstar, feed, system):
     """
     Compute dQ/dt using:
-      - SMA (only) for ion–ion
-      - SMA or LDF for protein–ion, with weights from Qstar
+      - SMA mass-action for ion–ion
+      - SMA or LDF for protein–ion, using lnQstar for weights
     """
     Nz = system.config.Nz
     _, flow_rate = feed
     t_res = system.config.vol_interstitial / flow_rate
-    # initialize output
     dQdt = {s: np.zeros(Nz) for s in system.species}
-    # outer loop over z
+    ion_list = list(system.ions.keys())
+
     for z in range(Nz):
-        # 1) protein–ion rates rji[j][i]
+        # 1) protein–ion
         rji = {j: {} for j in system.proteins}
         for j, prot in system.proteins.items():
             nu = prot.nu
+            # build per-z log-vector for this j
+            ln_vals = np.array([lnQstar[j][i][z] for i in ion_list])
+            # log-sum-exp for normalization
+            ln_denom = logsumexp(ln_vals)
             sum_r = 0.0
-            # pre-sum Qstar[j][i][z] for normalization (avoid zero-div)
-            denom = sum(Qstar[j][i][z] for i in system.ions)
-            denom = np.where(denom > 1e-12, denom, 1e-12)
-            for i in system.ions:
+
+            for idx, i in enumerate(ion_list):
                 model = system.pair_kinetic_model.get((j, i), system.kinetic_model)
                 if model == "SMA":
-                    # mass-action
                     r = (
-                        system.k_ads[(j, i)] * C[j][z] * (Qbar[i][z] ** nu)
-                        - system.k_des[(j, i)] * Q[j][z] * (C[i][z] ** nu)
+                        system.k_ads[(j, i)] * C[j][z] * Qbar[i][z]**nu
+                        - system.k_des[(j, i)] * Q[j][z] * C[i][z]**nu
                     )
                 else:
-                    # LDF toward Qstar
-                    w = Qstar[j][i][z] / denom
+                    # LDF: weight from ln-space
+                    w = np.exp(ln_vals[idx] - ln_denom)
                     Qji = w * Q[j][z]
-                    r   = system.k_ldf[(j, i)] * (Qstar[j][i][z] - Qji)
+                    Qstar_val = np.exp(ln_vals[idx])
+                    r = system.k_ldf[(j, i)] * (Qstar_val - Qji)
 
                 rji[j][i] = r
-                sum_r     += r
+                sum_r += r
 
-            # protein balance
             dQdt[j][z] = sum_r / t_res
-        # 2) ion balances
-        for i in system.ions:
+
+        # 2) ion–ion + protein sink
+        for i in ion_list:
             acc = 0.0
-            # ion–ion (SMA only)
-            for k in system.ions:
+            # ion–ion SMA only
+            for k in ion_list:
                 if k == i:
                     continue
                 acc += (
                     system.k_ads[(i, k)] * C[i][z] * Q[k][z]
                     - system.k_des[(i, k)] * Q[i][z] * C[k][z]
                 )
-            # subtract each protein displacement
+            # subtract protein displacement
             for j, prot in system.proteins.items():
                 acc -= prot.nu * rji[j][i]
             dQdt[i][z] = acc / t_res
+
     return dQdt
 
 def calc_dCdt(C, dQdt, feed, system):

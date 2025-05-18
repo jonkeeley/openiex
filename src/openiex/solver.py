@@ -4,7 +4,7 @@ from typing import Any
 from dataclasses import dataclass
 from scipy.integrate import solve_ivp
 from .state import unpack_state, pack_state
-from .physics import calc_Qbar, calc_Qstar, calc_dQdt, calc_dCdt
+from .physics import calc_Qbar, calc_lnQstar, calc_dQdt, calc_dCdt
 from .method import Method, get_feed
 from .system import ExchangeSystem
 try:
@@ -54,8 +54,8 @@ class ODEFunction:
         C, Q    = unpack_state(y, self.system)
         feed    = get_feed(t, self.method, self.system)
         Qbar    = calc_Qbar(Q, self.system)
-        Qstar   = calc_Qstar(C, Qbar, self.system)
-        dQdt    = calc_dQdt(C, Q, Qbar, Qstar, feed, self.system)
+        lnQstar   = calc_lnQstar(C, Qbar, self.system)
+        dQdt    = calc_dQdt(C, Q, Qbar, lnQstar, feed, self.system)
         dCdt    = calc_dCdt(C, dQdt, feed, self.system)
         return pack_state(dCdt, dQdt, self.system)
 
