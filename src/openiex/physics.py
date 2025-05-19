@@ -25,58 +25,55 @@ def calc_dQdt(C, Q, Qbar, feed, system, eps=1e-30):
     t_res            = vol_interstitial / flow_rate
 
     # 1) Precompute log‐clamped arrays once per species
-    logC    = { i: np.log(np.maximum(C[i],    eps)) for i in system.ions }
-    logQ    = { i: np.log(np.maximum(Q[i],    eps)) for i in system.species }
+    logC    = { s: np.log(np.maximum(C[s],    eps)) for s in system.species }
+    logQ    = { s: np.log(np.maximum(Q[s],    eps)) for s in system.species }
     logQbar = { i: np.log(np.maximum(Qbar[i], eps)) for i in system.ions }
 
     # 2) Initialize output
     dQdt = { s: np.zeros(Nz) for s in system.species }
 
-    # 3) Loop over species but do the entire z‐vector with numpy
+    # 3) Vectorized ion–ion & protein–ion exchange for ions
     for i in system.ions:
-        Li = logC[i]      # shape (Nz,)
+        Li = logC[i]    # shape (Nz,)
         Qi = logQ[i]
+
         # --- ion–ion exchange ---
         for k in system.ions:
-            if k == i: continue
+            if k == i:
+                continue
             Lk = logC[k]
             Qk = logQ[k]
-
             ads_exp = system.ln_k_ads[(i, k)] + Li + Qk
             des_exp = system.ln_k_des[(i, k)] + Qi + Lk
-
             dQdt[i] += np.exp(ads_exp) - np.exp(des_exp)
 
         # --- protein–ion exchange ---
         for j, pj in system.proteins.items():
             nu = pj.nu
-            Lj  = logC[j]    if j in system.ions    else logQ[j]  # careful: C[j] vs Q[j]
-            Qj  = logQ[j]
-
+            Qj      = logQ[j]
+            Cj_log  = logC[j]
             ads_exp = system.ln_k_ads[(i, j)] + nu * Li + Qj
-            des_exp = system.ln_k_des[(i, j)] + Qi + nu * Lj
-
+            des_exp = system.ln_k_des[(i, j)] + Qi + nu * Cj_log
             dQdt[i] += np.exp(ads_exp) - np.exp(des_exp)
 
-    # 4) Protein rows
+    # 4) Protein rows: ion–protein exchange
     for j, pj in system.proteins.items():
         Lj = logQ[j]
         nu = pj.nu
+        Cj = logC[j]
         for i in system.ions:
             Qbari = logQbar[i]
-            Li    = logC[j]  # careful: C[j] for proteins in this block?
             Ci    = logC[i]
-
-            ads_exp = system.ln_k_ads[(j, i)] + Li + nu * Qbari
+            ads_exp = system.ln_k_ads[(j, i)] + Cj + nu * Qbari
             des_exp = system.ln_k_des[(j, i)] + Lj + nu * Ci
-
             dQdt[j] += np.exp(ads_exp) - np.exp(des_exp)
 
-    # 5) Scale once
+    # 5) Scale by residence time
     for s in dQdt:
         dQdt[s] /= t_res
 
     return dQdt
+
 
 def calc_dCdt(C, dQdt, feed, system):
     Nz = system.config.Nz
