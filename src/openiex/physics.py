@@ -20,40 +20,59 @@ def calc_Qbar(Q, system):
 
 def calc_dQdt(C, Q, Qbar, feed, system, eps=1e-30):
     Nz = system.config.Nz
-    _, flow_rate = feed
+    _, flow_rate     = feed
     vol_interstitial = system.config.vol_interstitial
-    t_res = vol_interstitial / flow_rate
+    t_res            = vol_interstitial / flow_rate
 
+    # 1) Precompute log‐clamped arrays once per species
+    logC    = { i: np.log(np.maximum(C[i],    eps)) for i in system.ions }
+    logQ    = { i: np.log(np.maximum(Q[i],    eps)) for i in system.species }
+    logQbar = { i: np.log(np.maximum(Qbar[i], eps)) for i in system.ions }
+
+    # 2) Initialize output
     dQdt = { s: np.zeros(Nz) for s in system.species }
 
+    # 3) Loop over species but do the entire z‐vector with numpy
     for i in system.ions:
-        for z in range(Nz):
-            # Ion–ion exchange (log-space)
-            for k in system.ions:
-                if k != i:
-                    expo_ads = system.ln_k_ads[(i, k)] + np.log(np.maximum(C[i][z], eps)) + np.log(np.maximum(Q[k][z], eps))
-                    expo_des = system.ln_k_des[(i, k)] + np.log(np.maximum(Q[i][z], eps)) + np.log(np.maximum(C[k][z], eps))
-                    dQdt[i][z] += np.exp(expo_ads)
-                    dQdt[i][z] -= np.exp(expo_des)
+        Li = logC[i]      # shape (Nz,)
+        Qi = logQ[i]
+        # --- ion–ion exchange ---
+        for k in system.ions:
+            if k == i: continue
+            Lk = logC[k]
+            Qk = logQ[k]
 
-            # Protein–ion exchange (log-space)
-            for j in system.proteins:
-                nu_j = system.proteins[j].nu
-                expo_ads = system.ln_k_ads[(i, j)] + nu_j * np.log(np.maximum(C[i][z], eps)) + np.log(np.maximum(Q[j][z], eps))
-                expo_des = system.ln_k_des[(i, j)] + np.log(np.maximum(Q[i][z], eps)) + nu_j * np.log(np.maximum(C[j][z], eps))
-                dQdt[i][z] += np.exp(expo_ads)
-                dQdt[i][z] -= np.exp(expo_des)
+            ads_exp = system.ln_k_ads[(i, k)] + Li + Qk
+            des_exp = system.ln_k_des[(i, k)] + Qi + Lk
 
-    for j in system.proteins:
-        for z in range(Nz):
-            nu_j = system.proteins[j].nu
-            for i in system.ions:
-                expo_ads = system.ln_k_ads[(j, i)] + np.log(np.maximum(C[j][z], eps)) + nu_j * np.log(np.maximum(Qbar[i][z], eps))
-                expo_des = system.ln_k_des[(j, i)] + np.log(np.maximum(Q[j][z], eps)) + nu_j * np.log(np.maximum(C[i][z], eps))
-                dQdt[j][z] += np.exp(expo_ads)
-                dQdt[j][z] -= np.exp(expo_des)
+            dQdt[i] += np.exp(ads_exp) - np.exp(des_exp)
 
-    # Scale by residence time
+        # --- protein–ion exchange ---
+        for j, pj in system.proteins.items():
+            nu = pj.nu
+            Lj  = logC[j]    if j in system.ions    else logQ[j]  # careful: C[j] vs Q[j]
+            Qj  = logQ[j]
+
+            ads_exp = system.ln_k_ads[(i, j)] + nu * Li + Qj
+            des_exp = system.ln_k_des[(i, j)] + Qi + nu * Lj
+
+            dQdt[i] += np.exp(ads_exp) - np.exp(des_exp)
+
+    # 4) Protein rows
+    for j, pj in system.proteins.items():
+        Lj = logQ[j]
+        nu = pj.nu
+        for i in system.ions:
+            Qbari = logQbar[i]
+            Li    = logC[j]  # careful: C[j] for proteins in this block?
+            Ci    = logC[i]
+
+            ads_exp = system.ln_k_ads[(j, i)] + Li + nu * Qbari
+            des_exp = system.ln_k_des[(j, i)] + Lj + nu * Ci
+
+            dQdt[j] += np.exp(ads_exp) - np.exp(des_exp)
+
+    # 5) Scale once
     for s in dQdt:
         dQdt[s] /= t_res
 
