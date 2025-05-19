@@ -253,7 +253,7 @@ def plot_chromatogram(
             ("Cond", cond_s[mask], plot_conductivity, "orange"),
             ("%B",   B_s[mask],    plot_percent_B, "green"),
         ]
-        ylabel = "Absorbance (AU)"
+        ylabel = "Absorbance (mAU)"
 
     elif y_axis.lower() == "cond":
         base  = cond.max() or 1.0

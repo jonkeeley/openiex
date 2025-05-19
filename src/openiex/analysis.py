@@ -11,8 +11,8 @@ def compute_chromatogram(result) -> Dict[str, np.ndarray]:
       - "t"     : time (s)
       - "vol"   : injected volume (mL)
       - "cv"    : column volumes (unitless)
-      - "A260"  : Abs260 (AU)
-      - "A280"  : Abs280 (AU)
+      - "A260"  : Abs260 (mAU)
+      - "A280"  : Abs280 (mAU)
       - "cond"  : conductivity (mS/cm)
       - "percent_B": %B
     """
@@ -39,8 +39,8 @@ def compute_chromatogram(result) -> Dict[str, np.ndarray]:
         for name, conc in C.items():
             sp = result.system.species[name]
             c_val = conc[-1, i]
-            A260[i]      += sp.ext_coeff_260 * c_val
-            A280[i]      += sp.ext_coeff_280 * c_val
+            A260[i]      += sp.ext_coeff_260 * c_val * 1e3
+            A280[i]      += sp.ext_coeff_280 * c_val * 1e3
             cond[i]      += sp.mol_cond      * c_val
 
         # %B
@@ -89,8 +89,8 @@ def export_chromatogram_csv(
         "Time (s)"            : d["t"],
         "Volume (mL)"         : d["vol"],
         "CV"                  : d["cv"],
-        "A280 (mAU)"          : d["A280"] * 1e3,
-        "A260 (mAU)"          : d["A260"] * 1e3,
+        "A280 (mAU)"          : d["A280"],
+        "A260 (mAU)"          : d["A260"],
         "Conductivity (mS/cm)": d["cond"],
         "%B"                  : d["percent_B"],
     })
