@@ -257,8 +257,8 @@ def plot_chromatogram(
 
     elif y_axis.lower() == "cond":
         base  = cond.max() or 1.0
-        A260_s = A260 / (A260.max() or 1.0) * base
-        A280_s = A280 / (A280.max() or 1.0) * base
+        A260_s = A260 / (max(A260.max(), A280.max()) or 1.0) * base
+        A280_s = A280 / (max(A260.max(), A280.max()) or 1.0) * base
         B_s     = B    / 100                   * base
         traces = [
             ("A260", A260_s[mask], plot_uv260, "purple"),
@@ -270,8 +270,8 @@ def plot_chromatogram(
 
     elif y_axis in ("%B","percent_B"):
         base   = 100.0
-        A260_s = A260 / (A260.max() or 1.0) * base
-        A280_s = A280 / (A280.max() or 1.0) * base
+        A260_s = A260 / (max(A260.max(), A280.max()) or 1.0) * base
+        A280_s = A280 / (max(A260.max(), A280.max()) or 1.0) * base
         cond_s = cond / (cond.max()   or 1.0) * base
         traces = [
             ("A260", A260_s[mask], plot_uv260, "purple"),
