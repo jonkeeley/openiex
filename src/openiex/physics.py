@@ -18,7 +18,7 @@ def calc_Qbar(Q, system):
                 Qbar[i][z_idx] = 0.0
     return Qbar
 
-def calc_dQdt(C, Q, Qbar, feed, system, eps=1e-30):
+def calc_dQdt(C, Q, Qbar, feed, system, eps=1e-30, max_step=0.1):
     Nz = system.config.Nz
     _, flow_rate     = feed
     vol_interstitial = system.config.vol_interstitial
@@ -71,6 +71,13 @@ def calc_dQdt(C, Q, Qbar, feed, system, eps=1e-30):
     # 5) Scale by residence time
     for s in dQdt:
         dQdt[s] /= t_res
+
+    # 6) Clamp per-step change: Q_new = Q + dQdt*dt <= 2Q, >= 0.5Q
+    for s in system.species:
+        Q_arr = Q[s]
+        upper = Q_arr / max_step       # max positive slope
+        lower = -0.5 * Q_arr / max_step  # max negative slope
+        dQdt[s] = np.minimum(np.maximum(dQdt[s], lower), upper)
 
     return dQdt
 
