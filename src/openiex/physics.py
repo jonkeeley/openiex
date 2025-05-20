@@ -53,7 +53,7 @@ def calc_dQdt(C, Q, Qbar, feed, system, eps=1e-30):
             Qj      = logQ[j]
             Cj_log  = logC[j]
             ads_exp = system.ln_k_ads[(i, j)] + nu * Li + Qj
-            des_exp = system.ln_k_des[(i, j)] + Qi + nu * Cj_log
+            des_exp = system.ln_k_des[(i, j)] + nu * Qi + Cj_log
             dQdt[i] += np.exp(ads_exp) - np.exp(des_exp)
 
     # 4) Protein rows: ion–protein exchange
