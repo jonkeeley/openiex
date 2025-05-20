@@ -12,4 +12,4 @@ from .io              import save_simulation, load_simulation
 
 # plotting
 from .analysis import compute_chromatogram, export_chromatogram_csv, analyze_fraction, generate_fraction_dataframe
-from .visualization   import plot_single_species, plot_chromatogram
+from .visualization   import plot_single_species, plot_chromatogram, plot_column_snapshot

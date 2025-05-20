@@ -1,8 +1,10 @@
 import numpy as np
 import matplotlib.pyplot as plt
+from matplotlib import cm
 from matplotlib.gridspec import GridSpec
 from typing import Union, Tuple, Optional, List, Literal
 import pandas as pd
+from ipywidgets import interact, FloatSlider
 from .state    import unpack_state
 from .solver   import SimulationResult
 from .method   import get_feed, convert_units
@@ -352,3 +354,100 @@ def plot_chromatogram(
         plot_fraction_table(df_frac, ax_t)
 
     plt.show()
+
+def plot_column_snapshot(
+    result,
+    species: str,
+    bound: bool = False,
+    x_axis: str = "time",
+    x_window: Optional[Tuple[float, float]] = None,
+    y_axis: Optional[str] = None,
+    data_point: Optional[float] = None
+):
+    """
+    Interactive column cross-section snapshot for one species.
+
+    Args:
+        result      : SimulationResult from run_simulation
+        species     : species name (e.g. "Cl-", "em")
+        bound       : if True, plot bound-phase Q; else mobile-phase C
+        x_axis      : 'time', 'volume', or 'CV' for slider axis
+        x_window    : optional (min, max) to restrict slider range
+        y_axis      : 'M' or 'particles/mL'; if None, uses species.unit
+        data_point  : initial slider value on chosen axis
+    """
+    # 1) Unpack profiles and system
+    C_profiles, Q_profiles = unpack_state(result.y, result.system)
+    profiles = Q_profiles[species] if bound else C_profiles[species]
+    Nz, Nt = profiles.shape
+
+    # 2) Chromatogram axes
+    d    = compute_chromatogram(result)
+    t    = d['t']; vol = d['vol']; cv = d['cv']
+    if x_axis == 'time':
+        x, xlabel = t, 'Time (s)'
+    elif x_axis == 'volume':
+        x, xlabel = vol, 'Injected Volume (mL)'
+    elif x_axis == 'CV':
+        x, xlabel = cv, 'Column Volumes (CV)'
+    else:
+        raise ValueError("x_axis must be 'time','volume', or 'CV'")
+
+    # 3) Apply x_window mask
+    mask = np.ones_like(x, dtype=bool)
+    if x_window is not None:
+        xmin, xmax = x_window
+        mask = (x >= xmin) & (x <= xmax)
+    x_p = x[mask]
+    prof_p = profiles[:, mask]
+
+    # 4) Unit conversion for concentration
+    unit = y_axis if y_axis else result.system.species[species].unit
+    if unit == 'M':
+        prof_plot = prof_p
+        cbar_label = 'Concentration (M)'
+    elif unit == 'particles/mL':
+        prof_plot = prof_p * _NA / 1e3
+        cbar_label = 'Concentration (particles/mL)'
+    else:
+        raise ValueError("y_axis must be 'M','particles/mL', or None")
+
+    # 5) Physical height extent
+    bed_h = result.system.config.bed_height
+
+    # 6) Frame plotting function
+    def _plot_frame(x_val):
+        idx = int(np.argmin(np.abs(x_p - x_val)))
+        data = prof_plot[::-1, idx][:, None]  # flip so z=0 at top
+        fig, ax = plt.subplots(figsize=(2, 5), constrained_layout=True)
+        im = ax.imshow(
+            data,
+            aspect='auto',
+            cmap=cm.viridis,
+            extent=[0, 1, 0, bed_h],
+            vmin=prof_plot.min(),
+            vmax=prof_plot.max()
+        )
+        phase = 'Bound' if bound else 'Mobile'
+        ax.set_title(f"{phase} Phase — {species}\n{xlabel} = {x_p[idx]:.2f}")
+        ax.set_xticks([])
+        ax.set_ylabel('Column Height (m)')
+        ax.invert_yaxis()  # z=0 at top
+        fig.colorbar(im, ax=ax, label=cbar_label)
+        plt.show()
+
+    # 7) Slider initialization
+    init = x_p[0] if data_point is None else np.clip(data_point, x_p[0], x_p[-1])
+    step = (x_p[-1] - x_p[0]) / max(1, len(x_p)-1)
+
+    interact(
+        _plot_frame,
+        x_val=FloatSlider(
+            value=init,
+            min=x_p[0],
+            max=x_p[-1],
+            step=step,
+            description=xlabel,
+            continuous_update=False
+        )
+    )
