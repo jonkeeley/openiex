@@ -72,31 +72,6 @@ def calc_dQdt(C, Q, Qbar, feed, system, eps=1e-30, max_step=0.1):
     for s in dQdt:
         dQdt[s] /= t_res
 
-    # 6) Clamp per-step change: Q_new = Q + dQdt*dt <= 2Q, >= 0.5Q
-    factor   = 10   
-    inv_f = 1.0 / factor
-    for s in system.species:
-        Q_arr = Q[s]
-        d     = dQdt[s]
-        eps = (system.config.Lambda * 1e-5)
-        upper = (factor - 1.0) * Q_arr / max_step
-        lower = (inv_f  - 1.0) * Q_arr / max_step
-        mask_large = Q_arr > eps
-        # clamp both bounds where Q > eps
-        if mask_large.any():
-            tmp = d[mask_large]
-            tmp = np.minimum(tmp, upper[mask_large])
-            tmp = np.maximum(tmp, lower[mask_large])
-            d[mask_large] = tmp
-        # clamp only lower bound where Q <= eps
-        mask_small = ~mask_large
-        if mask_small.any():
-            tmp2 = d[mask_small]
-            tmp2 = np.maximum(tmp2, lower[mask_small])
-            
-            d[mask_small] = tmp2
-        dQdt[s] = d
-
     return dQdt
 
 
