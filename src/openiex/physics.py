@@ -22,7 +22,6 @@ def calc_dQdt(C, Q, Qbar, feed, system, eps=1e-30, max_step=0.1):
     Nz = system.config.Nz
     _, flow_rate     = feed
     vol_interstitial = system.config.vol_interstitial
-    t_res            = vol_interstitial / flow_rate
 
     # 1) Precompute log‐clamped arrays once per species
     logC    = { s: np.log(np.maximum(C[s],    eps)) for s in system.species }
@@ -67,10 +66,6 @@ def calc_dQdt(C, Q, Qbar, feed, system, eps=1e-30, max_step=0.1):
             ads_exp = system.ln_k_ads[(j, i)] + Cj + nu * Qbari
             des_exp = system.ln_k_des[(j, i)] + Lj + nu * Ci
             dQdt[j] += np.exp(ads_exp) - np.exp(des_exp)
-
-    # 5) Scale by residence time
-    for s in dQdt:
-        dQdt[s] /= t_res
 
     return dQdt
 
