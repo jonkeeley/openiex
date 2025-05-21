@@ -199,7 +199,8 @@ def plot_chromatogram(
     plot_conductivity: bool = True,
     plot_percent_B: bool = True,
     fractions: Optional[List[Tuple[float, float]]] = None,
-    frac_species: Optional[List[str]] = None
+    frac_species: Optional[List[str]] = None,
+    show=True,
 ):
     """
     Plot overlaid chromatogram traces and optional fraction table,
@@ -352,8 +353,11 @@ def plot_chromatogram(
                                               fractions,
                                               species=frac_species)
         plot_fraction_table(df_frac, ax_t)
-
-    plt.show()
+        
+    if show:
+        plt.show()
+    else:
+        return img
 
 def plot_column_snapshot(
     result,
