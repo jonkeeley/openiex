@@ -15,17 +15,16 @@ class ExchangeSystem:
         self.inert = inert
         self.species = {**ions, **proteins, **inert}
         self.config = config
-        self.K_eq = {}
+        self.ln_K_eq = {}
         self.ln_k_ads = {}
         self.ln_k_des = {}
 
-    def set_equilibrium(self, a: str, b: str, K_eq_val: float, ln_k_ads_val: float):
-        ln_K_eq = np.log(K_eq_val)
-        self.K_eq[(a, b)]     = K_eq_val
+    def set_equilibrium(self, a: str, b: str, ln_K_eq_val: float, ln_k_ads_val: float):
+        self.ln_K_eq[(a, b)]  = ln_K_eq_val
         self.ln_k_ads[(a, b)] = ln_k_ads_val
-        self.ln_k_des[(a, b)] = ln_k_ads_val - ln_K_eq
-        self.K_eq[(b, a)]     = 1.0 / K_eq_val
-        self.ln_k_ads[(b, a)] = ln_k_ads_val - ln_K_eq
+        self.ln_k_des[(a, b)] = ln_k_ads_val - ln_K_eq_val
+        self.ln_K_eq[(b, a)]  = 1.0 - ln_K_eq_val
+        self.ln_k_ads[(b, a)] = ln_k_ads_val - ln_K_eq_val
         self.ln_k_des[(b, a)] = ln_k_ads_val
 
     def check_equilibria(self):
@@ -35,12 +34,12 @@ class ExchangeSystem:
         for i in range(len(ion_list)):
             for j in range(i + 1, len(ion_list)):
                 a, b = ion_list[i], ion_list[j]
-                if (a, b) not in self.K_eq:
+                if (a, b) not in self.ln_K_eq:
                     missing.append((a, b))
         # protein-ion
         for p in self.proteins:
             for i in self.ions:
-                if (p, i) not in self.K_eq:
+                if (p, i) not in self.ln_K_eq:
                     missing.append((p, i))
         if missing:
             print("Missing equilibrium definitions for:")
