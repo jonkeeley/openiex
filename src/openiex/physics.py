@@ -18,7 +18,7 @@ def calc_Qbar(Q, system):
                 Qbar[i][z_idx] = 0.0
     return Qbar
 
-def calc_dQdt(C, Q, Qbar, feed, system, eps=1e-30, max_step=0.1):
+def calc_dQdt(C, Q, Qbar, feed, system, eps=1e-30):
     Nz = system.config.Nz
     _, flow_rate     = feed
     vol_interstitial = system.config.vol_interstitial
