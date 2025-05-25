@@ -55,7 +55,7 @@ class ExchangeSystem:
             "ions": {
                 name: {
                     "D": ion.D,
-                    "Kd": ion.Kd,
+                    "K_d": ion.K_d,
                     "unit": ion.unit,
                     "mol_cond": ion.mol_cond,
                     "ext_coeff_260": ion.ext_coeff_260,
@@ -66,7 +66,7 @@ class ExchangeSystem:
             "proteins": {
                 name: {
                     "D": p.D,
-                    "Kd": p.Kd,
+                    "K_d": p.K_d,
                     "unit": p.unit,
                     "mol_cond": p.mol_cond,
                     "sigma": p.sigma,
@@ -79,7 +79,7 @@ class ExchangeSystem:
             "inert": {
                 name: {
                     "D": inv.D,
-                    "Kd": inv.Kd,
+                    "K_d": inv.K_d,
                     "unit": inv.unit,
                     "mol_cond": inv.mol_cond,
                     "ext_coeff_260": inv.ext_coeff_260,
@@ -113,7 +113,7 @@ class ExchangeSystem:
             name: Ion(
                 name,
                 D=vals["D"],
-                Kd=vals["Kd"],
+                K_d=vals["K_d"],
                 unit=vals["unit"],
                 mol_cond=vals["mol_cond"],
                 ext_coeff_260=vals.get("ext_coeff_260", 0.0),
@@ -125,7 +125,7 @@ class ExchangeSystem:
             name: Protein(
                 name,
                 D=vals["D"],
-                Kd=vals["Kd"],
+                K_d=vals["K_d"],
                 sigma=vals["sigma"],
                 nu=vals["nu"],
                 unit=vals["unit"],
@@ -139,7 +139,7 @@ class ExchangeSystem:
             name: Inert(
                 name,
                 D=vals["D"],
-                Kd=vals["Kd"],
+                K_d=vals["K_d"],
                 unit=vals["unit"],
                 mol_cond=vals["mol_cond"],
                 ext_coeff_260=vals.get("ext_coeff_260", 0.0),

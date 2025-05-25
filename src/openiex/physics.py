@@ -23,15 +23,15 @@ def calc_dQdt(C, Q, Qbar, feed, system, eps=1e-30):
     _, flow_rate     = feed
     vol_interstitial = system.config.vol_interstitial
 
-    # 1) Precompute log‐clamped arrays once per species
+    # Precompute log‐clamped arrays once per species
     logC    = { s: np.log(np.maximum(C[s],    eps)) for s in system.species }
     logQ    = { s: np.log(np.maximum(Q[s],    eps)) for s in system.species }
     logQbar = { i: np.log(np.maximum(Qbar[i], eps)) for i in system.ions }
 
-    # 2) Initialize output
+    # Initialize output
     dQdt = { s: np.zeros(Nz) for s in system.species }
 
-    # 3) Vectorized ion–ion & protein–ion exchange for ions
+    # Vectorized ion–ion & protein–ion exchange for ions
     for i in system.ions:
         Li = logC[i]    # shape (Nz,)
         Qi = logQ[i]
@@ -55,7 +55,7 @@ def calc_dQdt(C, Q, Qbar, feed, system, eps=1e-30):
             des_exp = system.ln_k_des[(i, j)] + nu * Qi + Cj_log
             dQdt[i] += np.exp(ads_exp) - np.exp(des_exp)
 
-    # 4) Protein rows: ion–protein exchange
+    # Protein rows: ion–protein exchange
     for j, pj in system.proteins.items():
         Lj = logQ[j]
         nu = pj.nu
@@ -82,7 +82,7 @@ def calc_dCdt(C, dQdt, feed, system):
     dCdt = {s: np.zeros(Nz) for s in system.species}
     for s in system.species.keys():
         D = system.species[s].D
-        Kd = system.species[s].Kd
+        K_d = system.species[s].K_d
         for z_idx in range(Nz):
             if z_idx == 0:
                 # INLET (one-sided forward difference)
@@ -96,7 +96,7 @@ def calc_dCdt(C, dQdt, feed, system):
                 # INTERIOR (central difference for diffusion, backward for advection)
                 dCdz = (C[s][z_idx] - C[s][z_idx - 1]) / dz
                 d2Cdz2 = (C[s][z_idx + 1] - 2 * C[s][z_idx] + C[s][z_idx - 1]) / dz**2
-            numerator = -v_interstitial * dCdz + D * d2Cdz2 - epsilon_p * Kd * dQdt[s][z_idx]
-            denominator = epsilon_i + epsilon_p * Kd
+            numerator = -v_interstitial * dCdz + D * d2Cdz2 - epsilon_p * K_d * dQdt[s][z_idx]
+            denominator = epsilon_i + epsilon_p * K_d
             dCdt[s][z_idx] = numerator / denominator
     return dCdt
