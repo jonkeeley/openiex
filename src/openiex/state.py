@@ -7,6 +7,16 @@ def initialize_state(
     initial_conditions: Dict[str, Dict[str, Any]],
     system: ExchangeSystem
 ) -> np.ndarray:
+    """
+    Build the initial state vector y0 for the solver, defining initial
+    mobile phase concentrations (C) and bound (Q).
+
+    Example: AEX column equilibrated with 2 mM MgCl2 - binding sites fully occupied with Cl-.
+        initial_conditions = {
+            "Cl-": {"C": 0.004, "Q": system.config.Lambda},
+            "Mg2+": {"C": 0.002}
+        }
+    """
     Nz = system.config.Nz
     species_list = list(system.species.keys())
 
@@ -67,7 +77,7 @@ def load_state(
         if name not in system.species:
             raise KeyError(f"Species '{name}' missing in new system")
         new_sp = system.species[name]
-        if (old_sp.D, old_sp.Kd, old_sp.unit) != (new_sp.D, new_sp.Kd, new_sp.unit):
+        if (old_sp.D, old_sp.K_d, old_sp.unit) != (new_sp.D, new_sp.K_d, new_sp.unit):
             warnings.warn(f"Species '{name}' parameters differ")
         if hasattr(old_sp, "sigma"):
             if (old_sp.sigma, old_sp.nu) != (new_sp.sigma, new_sp.nu):

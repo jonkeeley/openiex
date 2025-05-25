@@ -17,7 +17,7 @@ def plot_fraction_table(df: pd.DataFrame, ax: plt.Axes) -> None:
     formatting numeric entries as before and auto‐sizing columns so
     headers don’t overflow.
     """
-    # 1) Build the display text (unchanged)
+
     display_vals = []
     for row in df.itertuples(index=False):
         disp_row = []
@@ -33,23 +33,17 @@ def plot_fraction_table(df: pd.DataFrame, ax: plt.Axes) -> None:
 
     ax.axis("off")
 
-    # 2) Create the table
     table = ax.table(
         cellText=display_vals,
         colLabels=df.columns,
         cellLoc="center",
         loc="center"
     )
-
-    # 3) Styling and font
     table.auto_set_font_size(False)
     table.set_fontsize(8)
 
-    # 4) Auto‐set each column’s width so header fits
     ncols = len(df.columns)
     table.auto_set_column_width(col=list(range(ncols)))
-
-    # 5) Slightly increase vertical spacing
     table.scale(1, 1.5)
 
 _NA = 6.022e23
@@ -77,11 +71,11 @@ def plot_single_species(
       - optional data-point annotation
       - optional fraction‐summary table below
     """
-    # 1) unpack profiles
+    # Unpack
     C, Q = unpack_state(result.y, result.system)
     prof = Q if bound else C
 
-    # 2) resolve z-location
+    # Resolve z-location
     if z_location == "inlet":
         z_idx, loc_str = 0, "Inlet"
     elif z_location == "outlet":
@@ -91,11 +85,11 @@ def plot_single_species(
     else:
         raise ValueError("z_location must be 'inlet','outlet', or int")
 
-    # 3) compute axes
+    # Compute axes
     d    = compute_chromatogram(result)
     t    = d["t"];    vol  = d["vol"];   cv   = d["cv"]
 
-    # 4) pick x-axis
+    # Pick x-axis
     if x_axis == "time":
         x, xlabel = t, "Time (s)"
     elif x_axis == "volume":
@@ -105,7 +99,7 @@ def plot_single_species(
     else:
         raise ValueError("x_axis must be 'time','volume', or 'CV'")
 
-    # 5) apply x_window
+    # Apply x_window
     mask = np.ones_like(x, bool)
     if x_window:
         xmin, xmax = x_window
@@ -114,7 +108,7 @@ def plot_single_species(
     x_p   = x[mask]
     y_mol = prof[species][z_idx][mask]   # always in M
 
-    # 6) determine target unit
+    # Determine target unit
     target = y_axis if y_axis else result.system.species[species].unit
     if target == "M":
         y_plot, ylabel = y_mol, "Concentration (M)"
@@ -125,7 +119,7 @@ def plot_single_species(
     else:
         raise ValueError("y_axis must be 'M','particles/mL', or None")
 
-    # 7) set up figure (+ table if needed)
+    # Set up figure (+ table if needed)
     if fractions:
         fig = plt.figure(constrained_layout=True, figsize=(8,6))
         gs  = GridSpec(2, 1, height_ratios=[3,1], figure=fig)
@@ -135,10 +129,10 @@ def plot_single_species(
         fig, ax = plt.subplots(figsize=(8,5))
         ax_t = None
 
-    # 8) plot the main trace
+    # Plot the main trace
     ax.plot(x_p, y_plot, color="tab:blue", lw=1.5, label=species)
 
-    # 9) overlay feed
+    # Overlay feed
     if include_feed:
         feed_vals = []
         for ti in t[mask]:
@@ -149,14 +143,14 @@ def plot_single_species(
             feed_vals.append(val)
         ax.plot(x_p, feed_vals, "--", color="gray", label=f"{species} feed")
 
-    # 10) shade fractions
+    # Shade fractions
     if fractions:
         for start, stop in fractions:
             m_f = (x_p >= start) & (x_p <= stop)
             ax.fill_between(x_p, 0, y_plot, where=m_f,
                             color="lightgrey", alpha=0.3)
 
-    # 11) highlight data_point
+    # Highlight data_point
     if data_point is not None:
         idx = np.abs(x_p - data_point).argmin()
         xv, yv = x_p[idx], y_plot[idx]
@@ -168,7 +162,7 @@ def plot_single_species(
             ax.text(xv, yv, txt, ha="left", va="bottom",
                     fontsize=9, bbox=dict(boxstyle="round", facecolor="white", alpha=0.8))
 
-    # 12) finalize axes
+    # Finalize axes
     ax.set_xlabel(xlabel)
     ax.set_ylabel(ylabel)
     if x_window: ax.set_xlim(x_window)
@@ -177,7 +171,7 @@ def plot_single_species(
     ax.grid(True)
     ax.legend()
 
-    # 13) fraction summary table
+    # Fraction summary table
     if fractions and ax_t:
         df = generate_fraction_dataframe(
             result, x_axis, fractions, species=[species]
@@ -203,7 +197,7 @@ def plot_chromatogram(
     show=True,
 ):
     """
-    Plot overlaid chromatogram traces and optional fraction table,
+    Plot chromatogram traces and optional fraction table,
     with vertical lines marking each fraction interval.
 
     Args:
@@ -221,12 +215,12 @@ def plot_chromatogram(
       fractions         : list of (start,stop) windows in x units;
                            draws lines and shows a table below
     """
-    # 1) compute all traces & axes
+    # Compute all traces & axes
     d    = compute_chromatogram(result)
     t    = d["t"];    vol  = d["vol"];   cv   = d["cv"]
     A260 = d["A260"]; A280 = d["A280"]; cond = d["cond"]; B    = d["percent_B"]
 
-    # 2) pick x-axis
+    # Pick x-axis
     if x_axis == "time":
         x, xlabel = t, "Time (s)"
     elif x_axis == "volume":
@@ -236,7 +230,7 @@ def plot_chromatogram(
     else:
         raise ValueError("x_axis must be 'time','volume', or 'CV'")
 
-    # 3) mask by x_window
+    # Mask by x_window
     mask = np.ones_like(x, dtype=bool)
     if x_window:
         xmin, xmax = x_window
@@ -245,7 +239,7 @@ def plot_chromatogram(
     A260_p = A260[mask]; A280_p = A280[mask]
     cond_p = cond[mask]; B_p     = B[mask]
 
-    # 4) scale onto y_axis baseline
+    # Scale onto y_axis baseline
     if y_axis.upper() == "UV":
         base = max(A260.max(), A280.max()) or 1.0
         cond_s = cond / (cond.max() or 1.0) * base
@@ -287,7 +281,7 @@ def plot_chromatogram(
     else:
         raise ValueError("y_axis must be 'UV','cond', or '%B'/'percent_B'")
 
-    # 5) create figure + axes (with space for table)
+    # Create figure + axes (with space for table)
     if fractions:
         fig = plt.figure(constrained_layout=True, figsize=(10, 8))
         gs  = GridSpec(2, 1, height_ratios=[3, 1], figure=fig)
@@ -297,7 +291,7 @@ def plot_chromatogram(
         fig, ax = plt.subplots(figsize=(10, 6))
         ax_t = None
 
-    # 6) plot each trace
+    # Plot each trace
     for label, arr, show, color in traces:
         if show:
             ax.plot(x_p, arr, label=label, color=color)
@@ -307,29 +301,29 @@ def plot_chromatogram(
     ax.grid(True)
     ax.legend()
 
-    # 7) horizontal & vertical zoom
+    # Horizontal & vertical zoom
     if y_window:
         ax.set_ylim(y_window)
 
-    # 8) draw fraction lines & labels
+    # Draw fraction lines & labels
     if fractions:
-        # get current y‐limits so spans fill the whole height
+        # Get current y‐limits so spans fill the whole height
         ymin, ymax = ax.get_ylim()
         for i, (start, stop) in enumerate(fractions, 1):
-            # light grey shading between start and stop
+            # Light grey shading between start and stop
             ax.axvspan(start, stop, ymin=0, ymax=1,
                        color="lightgrey", alpha=0.2)
-            # boundary lines
+            # Boundary lines
             ax.axvline(start, color="gray", linestyle="--", linewidth=1)
             ax.axvline(stop,  color="gray", linestyle="--", linewidth=1)
-            # label in the middle, just above the top of the plot
+            # Label in the middle, just above the top of the plot
             mid = 0.5*(start + stop)
             ax.text(mid, ymax, str(i),
                     ha="center", va="bottom",
                     fontsize=9,
                     bbox=dict(boxstyle="round", facecolor="white", alpha=0.7))
 
-    # 9) highlight single data_point
+    # Highlight single data_point
     if data_point is not None:
         idx = np.abs(x_p - data_point).argmin()
         xv  = x_p[idx]
@@ -346,18 +340,16 @@ def plot_chromatogram(
                     fontsize=9, va="top",
                     bbox=dict(boxstyle="round", facecolor="wheat", alpha=0.5))
 
-    # 10) plot fraction summary table
+    # Plot fraction summary table
     if fractions and ax_t:
         df_frac = generate_fraction_dataframe(result,
                                               x_axis,
                                               fractions,
                                               species=frac_species)
         plot_fraction_table(df_frac, ax_t)
-        
+
     if show:
         plt.show()
-    else:
-        return img
 
 def plot_column_snapshot(
     result,
@@ -380,12 +372,12 @@ def plot_column_snapshot(
         y_axis      : 'M' or 'particles/mL'; if None, uses species.unit
         data_point  : initial slider value on chosen axis
     """
-    # 1) Unpack profiles and system
+    # Unpack profiles and system
     C_profiles, Q_profiles = unpack_state(result.y, result.system)
     profiles = Q_profiles[species] if bound else C_profiles[species]
     Nz, Nt = profiles.shape
 
-    # 2) Chromatogram axes
+    # Chromatogram axes
     d    = compute_chromatogram(result)
     t    = d['t']; vol = d['vol']; cv = d['cv']
     if x_axis == 'time':
@@ -397,7 +389,7 @@ def plot_column_snapshot(
     else:
         raise ValueError("x_axis must be 'time','volume', or 'CV'")
 
-    # 3) Apply x_window mask
+    # Apply x_window mask
     mask = np.ones_like(x, dtype=bool)
     if x_window is not None:
         xmin, xmax = x_window
@@ -405,7 +397,7 @@ def plot_column_snapshot(
     x_p = x[mask]
     prof_p = profiles[:, mask]
 
-    # 4) Unit conversion for concentration
+    # Unit conversion for concentration
     unit = y_axis if y_axis else result.system.species[species].unit
     if unit == 'M':
         prof_plot = prof_p
@@ -416,10 +408,10 @@ def plot_column_snapshot(
     else:
         raise ValueError("y_axis must be 'M','particles/mL', or None")
 
-    # 5) Physical height extent
+    # Physical height extent
     bed_h = result.system.config.bed_height
 
-    # 6) Frame plotting function
+    # Frame plotting function
     def _plot_frame(x_val):
         idx = int(np.argmin(np.abs(x_p - x_val)))
         data = prof_plot[::-1, idx][:, None]  # flip so z=0 at top
@@ -440,7 +432,7 @@ def plot_column_snapshot(
         fig.colorbar(im, ax=ax, label=cbar_label)
         plt.show()
 
-    # 7) Slider initialization
+    # Slider initialization
     init = x_p[0] if data_point is None else np.clip(data_point, x_p[0], x_p[-1])
     step = (x_p[-1] - x_p[0]) / max(1, len(x_p)-1)
 
