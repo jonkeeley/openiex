@@ -150,5 +150,5 @@ class ExchangeSystem:
         sys = cls(ions, proteins, inert, cfg)
         for key, params in data.get("equilibria", {}).items():
             a, b = key.split("|")
-            sys.set_equilibrium(a, b, params["K_eq"], params["ln_k_ads"])
+            sys.set_equilibrium(a, b, params["ln_K_eq"], params["ln_k_ads"])
         return sys
