@@ -5,6 +5,8 @@ from .state    import unpack_state
 from .solver   import SimulationResult
 from .method   import get_feed
 
+NA = 6.02214076e23
+
 def compute_chromatogram(result) -> Dict[str, np.ndarray]:
     """
     For a SimulationResult, compute and return a dict with:
@@ -149,29 +151,29 @@ def analyze_fraction(
         if species and name not in species:
             continue
 
-        # extract outlet segment and compute mean concentration
+        # extract outlet segment and compute mean concentration in mol/L
         vals = conc_profile[-1, mask]
-        mean_c = np.mean(vals)  # mol/L
-        unit   = result.system.species[name].unit
+        mean_c_molar = np.mean(vals)  # mol/L
+        unit          = result.system.species[name].unit
 
+        # convert mean concentration to native units
         if unit == "M":
-            total_amount = mean_c * (fraction_vol_ml / 1e3)  # mol/L * L = mol
+            mean_conc = mean_c_molar
+            total_amount = mean_conc * (fraction_vol_ml / 1e3)  # mol/L * L = mol
         elif unit == "particles/mL":
-            # convert mol/L to particles/mL, then * mL
-            NA = 6.02214076e23
-            mean_particles_per_ml = mean_c * NA / 1e3
-            total_amount = mean_particles_per_ml * fraction_vol_ml
+            mean_conc = mean_c_molar * NA / 1e3  # mol/L → particles/mL
+            total_amount = mean_conc * fraction_vol_ml  # particles/mL * mL = particles
         else:
             raise ValueError(f"Unsupported unit '{unit}' for species '{name}'")
 
         recs.append({
-            "Species"               : name,
-            "Unit"                  : unit,
-            "Start"                 : actual_start,
-            "Stop"                  : actual_stop,
-            "Fraction Volume (mL)"  : fraction_vol_ml,
-            "Mean Concentration"    : mean_c,
-            "Total Amount"          : total_amount
+            "Species": name,
+            "Unit": unit,
+            "Start": actual_start,
+            "Stop": actual_stop,
+            "Fraction Volume (mL)": fraction_vol_ml,
+            "Mean Concentration": mean_conc,
+            "Total Amount": total_amount,
         })
 
     return pd.DataFrame.from_records(recs)
