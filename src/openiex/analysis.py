@@ -20,20 +20,20 @@ def compute_chromatogram(result) -> Dict[str, np.ndarray]:
     C, _   = unpack_state(result.y, result.system)
     Vcol   = result.system.config.vol_column
 
-    # 1) cumulative volume
+    # Cumulative volume
     flows    = np.array([get_feed(ti, result.method, result.system)[1] for ti in t])
     flow_ml  = flows * 1e6
     vol_ml   = np.concatenate(([0.0],
                  np.cumsum((flow_ml[1:]+flow_ml[:-1])/2 * np.diff(t))))
     cv       = vol_ml / (Vcol * 1e6)
 
-    # 2) allocate signals
+    # Allocate signals
     A260     = np.zeros_like(t)
     A280     = np.zeros_like(t)
     cond     = np.zeros_like(t)
     percent_B= np.zeros_like(t)
 
-    # 3) fill signals
+    # Fill signals
     for i, ti in enumerate(t):
         # UV + cond at outlet
         for name, conc in C.items():
@@ -114,13 +114,13 @@ def analyze_fraction(
     
     If `species` is given, only those names are returned.
     """
-    # 1) grab aggregated axes from compute_chromatogram
+    # Grab aggregated axes from compute_chromatogram
     d   = compute_chromatogram(result)
     t   = d["t"]
     vol = d["vol"]       # mL
     cv  = d["cv"]        # unitless
 
-    # 2) pick x array
+    # Pick x array
     if x_axis == "time":
         x = t
     elif x_axis == "volume":
@@ -130,35 +130,35 @@ def analyze_fraction(
     else:
         raise ValueError("x_axis must be 'time','volume', or 'CV'")
 
-    # 3) mask window
+    # Mask window
     mask = (x >= x_start) & (x <= x_stop)
     if not mask.any():
         raise ValueError(f"No data in [{x_start}, {x_stop}] {x_axis}")
 
-    # 4) actual bounds & fraction volume
+    # Actual bounds & fraction volume
     actual_start = x[mask][0]
     actual_stop  = x[mask][-1]
     vol_start    = vol[mask][0]
     vol_stop     = vol[mask][-1]
     fraction_vol_ml = vol_stop - vol_start
 
-    # 5) pull out species profiles
+    # Pull out species profiles
     C, _ = unpack_state(result.y, result.system)
     recs = []
     for name, conc_profile in C.items():
         if species and name not in species:
             continue
 
-        # only outlet segment
+        # Only outlet segment
         vals = conc_profile[-1, mask]
         mean_c = np.mean(vals)
         unit   = result.system.species[name].unit
 
         if unit == "M":
-            # mean mol/L × L → moles
+            # Mean mol/L × L → moles
             total = mean_c * (fraction_vol_ml / 1e3)
         else:
-            # particles/mL × mL → particles
+            # Particles/mL × mL → particles
             total = mean_c * fraction_vol_ml
 
         recs.append({
