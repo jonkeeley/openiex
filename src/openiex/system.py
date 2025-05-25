@@ -88,8 +88,8 @@ class ExchangeSystem:
                 for name, inv in self.inert.items()
             },
             "equilibria": {
-                f"{a}|{b}": {"K_eq": self.K_eq[(a, b)], "ln_k_ads": self.ln_k_ads[(a, b)]}
-                for (a, b) in self.K_eq
+                f"{a}|{b}": {"ln_K_eq": self.ln_K_eq[(a, b)], "ln_k_ads": self.ln_k_ads[(a, b)]}
+                for (a, b) in self.ln_K_eq
             }
         }
 
