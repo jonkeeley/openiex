@@ -178,7 +178,6 @@ def analyze_fraction(
 
     return pd.DataFrame.from_records(recs)
 
-
 def generate_fraction_dataframe(
     result: Any,
     x_axis: Literal["time", "volume", "CV"],
