@@ -378,8 +378,10 @@ def plot_column_snapshot(
     Nz, Nt = profiles.shape
 
     # Chromatogram axes
+    t    = result.t
     d    = compute_chromatogram(result)
-    t    = d['t']; vol = d['vol']; cv = d['cv']
+    vol  = d['vol']
+    cv   = d['cv']
     if x_axis == 'time':
         x, xlabel = t, 'Time (s)'
     elif x_axis == 'volume':
