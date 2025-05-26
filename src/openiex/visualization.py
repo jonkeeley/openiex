@@ -354,7 +354,7 @@ def plot_chromatogram(
 def plot_column_snapshot(
     result,
     species: str,
-    bound: bool = False,
+    bound: bool = True,
     x_axis: str = "time",
     x_window: Optional[Tuple[float, float]] = None,
     y_axis: Optional[str] = None,
