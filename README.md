@@ -36,3 +36,9 @@
 git clone https://github.com/you/openiex.git
 cd openiex
 pip install -e .
+```
+
+## Documentation
+
+- **Mathematical Derivations**: see the [math notebook](notebooks/math_background.ipynb) for all the SMA derivations and dimensional analysis  
+- **Example Workflows** in the [`notebooks/`](notebooks/) directory  
