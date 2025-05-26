@@ -30,3 +30,6 @@ dist/
 
 # VS Code
 .vscode/
+
+# Results
+results/
