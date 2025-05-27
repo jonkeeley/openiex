@@ -8,14 +8,6 @@
 
 ![Example Chromatogram - AAV Step Elution](docs/images/openiex_showcase_image_AAV.png)
 
-## Who Should Use This
-
-- Academic researchers  
-- Biotech startups & PD scientists  
-- Core labs and CROs  
-
----
-
 ## Features
 
 - Define arbitrary buffer compositions, column dimensions, and flow programs  
@@ -48,6 +40,12 @@ pip install -e .
 I built **openiex** as a personal side-project to explore modeling of ion-exchange chromatography and to have a shareable tool for my own portfolio. It’s designed to be:
 - **Lightweight & Accessible**: No bulky licenses or vendor lock-in—ideal for small startups, academic labs, or anyone who wants to prototype without expensive commercial software.
 - **Highly Customizable**: Every buffer, gradient, and species parameter is exposed in plain Python, so you can tailor it to your system or extend it to new applications.
+
+## Who Should Use This
+
+- Academic researchers  
+- Biotech startups & PD scientists  
+- Core labs and CROs  
 
 ## Feedback & Collaboration
 
